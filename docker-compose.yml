@@ -1,0 +1,16 @@
+services:
+  api:
+    build: . # บอกให้สร้างจาก Dockerfile ที่อยู่ในโฟลเดอร์เดียวกันนี้
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app # Mount โค้ดของเราเข้าไปเพื่อให้ Air เห็นการเปลี่ยนแปลง
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - sage-network
+networks:
+  sage-network:
+    external: true

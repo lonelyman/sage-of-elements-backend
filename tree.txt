@@ -1,0 +1,93 @@
+.
+├── Dockerfile
+├── cmd
+│   └── api
+│       └── main.go
+├── configs
+│   └── config.yml
+├── db
+│   └── migrations
+├── docker-compose.yml
+├── docs
+├── go.mod
+├── go.sum
+├── internal
+│   ├── adapters
+│   │   ├── cache
+│   │   │   └── redis
+│   │   │       └── game_data_cache.go
+│   │   ├── primary
+│   │   │   └── http
+│   │   │       └── middleware
+│   │   │           ├── auth.go
+│   │   │           └── general.go
+│   │   └── storage
+│   │       └── postgres
+│   │           ├── character_repository.go
+│   │           ├── fusion_repository.go
+│   │           ├── game_data_repository.go
+│   │           ├── migrate.go
+│   │           ├── player_repository.go
+│   │           └── seeder.go
+│   ├── domain
+│   │   ├── character.go
+│   │   ├── character_journal_discovery.go
+│   │   ├── character_mastery.go
+│   │   ├── dimensional_seal_inventory.go
+│   │   ├── effect.go
+│   │   ├── element.go
+│   │   ├── enemy.go
+│   │   ├── game_config.go
+│   │   ├── mastery.go
+│   │   ├── player.go
+│   │   ├── player_auth.go
+│   │   ├── pve.go
+│   │   ├── recipe.go
+│   │   ├── recipe_ingredient.go
+│   │   ├── spell.go
+│   │   └── spell_effect.go
+│   └── modules
+│       ├── character
+│       │   ├── handler.go
+│       │   ├── repository.go
+│       │   └── service.go
+│       ├── combat
+│       ├── fusion
+│       │   ├── handler.go
+│       │   ├── repository.go
+│       │   └── service.go
+│       ├── game_data
+│       │   ├── cache.go
+│       │   ├── handler.go
+│       │   ├── repository.go
+│       │   └── service.go
+│       └── player
+│           ├── handler.go
+│           ├── repository.go
+│           └── service.go
+├── pkg
+│   ├── appauth
+│   │   └── auth.go
+│   ├── appconfig
+│   │   └── config.go
+│   ├── apperrors
+│   │   └── errors.go
+│   ├── applogger
+│   │   ├── logger.go
+│   │   ├── pretty_logger.go
+│   │   └── slog_logger.go
+│   ├── appresponse
+│   │   └── response.go
+│   ├── appvalidator
+│   │   └── validator.go
+│   └── platform
+│       ├── apppostgres
+│       │   └── postgres.go
+│       └── appredis
+│           └── redis.go
+├── tmp
+│   ├── air.log
+│   └── main
+└── tree.txt
+
+34 directories, 57 files

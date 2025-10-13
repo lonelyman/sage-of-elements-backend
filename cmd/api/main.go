@@ -14,9 +14,12 @@ import (
 	"sage-of-elements-backend/internal/adapters/primary/http/middleware"
 	"sage-of-elements-backend/internal/adapters/storage/postgres"
 	"sage-of-elements-backend/internal/modules/character"
+	"sage-of-elements-backend/internal/modules/combat"
+	"sage-of-elements-backend/internal/modules/deck"
 	"sage-of-elements-backend/internal/modules/fusion"
 	"sage-of-elements-backend/internal/modules/game_data"
 	"sage-of-elements-backend/internal/modules/player"
+	"sage-of-elements-backend/internal/modules/pve"
 	"sage-of-elements-backend/pkg/appauth"
 	"sage-of-elements-backend/pkg/appconfig"
 	"sage-of-elements-backend/pkg/apperrors"
@@ -74,17 +77,30 @@ func main() {
 	playerHandler := player.NewPlayerHandler(appValidator, playerSvc)
 
 	gameDataDbRepo := postgres.NewGameDataRepository(db)
-	gameDataCacheRepo := redis.NewGameDataCacheRepository(redisClient)                        // <-- สร้าง Cache Repo
-	gameDataSvc := game_data.NewGameDataService(appLogger, gameDataDbRepo, gameDataCacheRepo) // <-- ฉีด Cache Repo เข้าไป!
+	gameDataCacheRepo := redis.NewGameDataCacheRepository(redisClient)
+	gameDataSvc := game_data.NewGameDataService(appLogger, gameDataDbRepo, gameDataCacheRepo)
 	gameDataHandler := game_data.NewGameDataHandler(gameDataSvc)
 
 	characterRepo := postgres.NewCharacterRepository(db)
 	characterSvc := character.NewCharacterService(appLogger, characterRepo, gameDataDbRepo)
 	characterHandler := character.NewCharacterHandler(appValidator, characterSvc)
 
+	deckRepo := postgres.NewDeckRepository(db)
+	deckSvc := deck.NewDeckService(appLogger, deckRepo, characterRepo)
+	deckHandler := deck.NewDeckHandler(appValidator, deckSvc)
+
 	fusionRepo := postgres.NewFusionRepository(db)
 	fusionSvc := fusion.NewFusionService(appLogger, db, fusionRepo, characterRepo, gameDataDbRepo)
-	fusionHandler := fusion.NewFusionHandler(appValidator, fusionSvc) // <-- (เรายังไม่ได้สร้าง Handler ตัวนี้นะ)
+	fusionHandler := fusion.NewFusionHandler(appValidator, fusionSvc)
+
+	pveRepo := postgres.NewPveRepository(db)
+	pveSvc := pve.NewPveService(pveRepo)
+	pveHandler := pve.NewPveHandler(pveSvc)
+
+	enemyRepo := postgres.NewEnemyRepository(db)
+	combatRepo := postgres.NewCombatRepository(db)
+	combatSvc := combat.NewCombatService(appLogger, combatRepo, characterRepo, enemyRepo, pveRepo)
+	combatHandler := combat.NewCombatHandler(appValidator, combatSvc)
 
 	// --- 4. Setup Fiber App & Routes ---
 	app := fiber.New(fiber.Config{
@@ -120,23 +136,33 @@ func main() {
 	// --- สร้าง Group หลักสำหรับแต่ละ Module ---
 	playerGroup := apiV1.Group("/players")
 	characterGroup := apiV1.Group("/characters")
+	deckGroup := apiV1.Group("/decks")
 	gameDataGroup := apiV1.Group("/game-data")
 	fusionGroup := apiV1.Group("/fusion")
+	pveGroup := apiV1.Group("/pve")
+	matchGroup := apiV1.Group("/matches")
 	// --- Public Routes ---
 	playerHandler.RegisterPublicRoutes(playerGroup)
 
 	playerGroup.Use(authMiddleware)
 	characterGroup.Use(authMiddleware)
+	deckGroup.Use(authMiddleware)
 	gameDataGroup.Use(authMiddleware)
 	fusionGroup.Use(authMiddleware)
+	pveGroup.Use(authMiddleware)
+	matchGroup.Use(authMiddleware)
+
+	// --- Protected Routes ---
 
 	// ลงทะเบียน Protected Routes
 	playerHandler.RegisterProtectedRoutes(playerGroup)
 	characterHandler.RegisterProtectedRoutes(characterGroup)
-
+	deckHandler.RegisterProtectedRoutes(deckGroup)
 	gameDataHandler.RegisterProtectedRoutes(gameDataGroup)
 
 	fusionHandler.RegisterProtectedRoutes(fusionGroup)
+	pveHandler.RegisterProtectedRoutes(pveGroup)
+	combatHandler.RegisterProtectedRoutes(matchGroup)
 
 	// --- 5. Start Server & Graceful Shutdown ---
 	go func() {

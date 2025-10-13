@@ -12,6 +12,8 @@ type Enemy struct {
 	MaxHP        int            `gorm:"not null;comment:พลังชีวิตสูงสุดพื้นฐาน"`
 	Initiative   int            `gorm:"not null;comment:ค่าความเร็วพื้นฐาน"`
 	MaxEndurance int            `gorm:"not null;comment:ค่าความอดทนสูงสุดพื้นฐาน"`
+	ElementID    uint           `gorm:"comment:ID ของธาตุประจำตัวศัตรู (FK to elements)"`
+	Element      *Element       `gorm:"foreignKey:ElementID;references:ID"`
 }
 
 // EnemyAbility คือท่าโจมตีหรือความสามารถ 1 อย่างของศัตรู
@@ -23,6 +25,16 @@ type EnemyAbility struct {
 	Descriptions datatypes.JSON `gorm:"type:jsonb;comment:คำอธิบายการทำงานของท่า"`
 	APCost       int            `gorm:"not null;comment:ต้นทุน AP ที่ศัตรูต้องใช้"`
 	EffectsJSON  datatypes.JSON `gorm:"type:jsonb;comment:ผลลัพธ์ของท่าโจมตีในรูปแบบ JSON"`
+}
+
+// EnemyLoot คือตารางที่บอกว่าศัตรู 1 ชนิดมีโอกาสดรอปไอเทมอะไรบ้าง
+type EnemyLoot struct {
+	ID         uint    `gorm:"primaryKey"`
+	EnemyID    uint    `gorm:"not null;comment:ID ของศัตรู (FK to enemies)"`
+	ElementID  uint    `gorm:"not null;comment:ID ของธาตุที่จะดรอป (FK to elements)"`
+	DropChance float64 `gorm:"not null;comment:โอกาสดรอป (0.0 ถึง 1.0)"`
+	MinAmount  int     `gorm:"not null;default:1;comment:จำนวนดรอปขั้นต่ำ"`
+	MaxAmount  int     `gorm:"not null;default:1;comment:จำนวนดรอปสูงสุด"`
 }
 
 // EnemyAI คือ "กฎ" การตัดสินใจ 1 ข้อของศัตรู

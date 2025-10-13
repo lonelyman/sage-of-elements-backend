@@ -28,6 +28,14 @@ func AutoMigrate(db *gorm.DB, appLogger applogger.Logger) error {
 		&domain.CharacterMastery{},
 		&domain.DimensionalSealInventory{},
 		&domain.CharacterJournalDiscovery{},
+
+		&domain.Deck{},
+		&domain.DeckSlot{},
+
+		&domain.StageEnemy{},
+		&domain.Enemy{},
+		&domain.EnemyAbility{},
+		&domain.EnemyAI{},
 	)
 
 	if err != nil {

@@ -18,6 +18,8 @@ type CharacterService interface {
 	GetCharacterByID(playerID, characterID uint) (*domain.Character, error)
 	DeleteCharacter(playerID, characterID uint) error
 	GetInventory(playerID, characterID uint) (*InventoryResponse, error)
+	AdvanceTutorialStep(playerID, characterID uint) (*domain.Character, error)
+	SkipTutorial(playerID, characterID uint) (*domain.Character, error)
 }
 
 // characterService คือ struct ที่จะเก็บ Logic การทำงานจริง
@@ -295,4 +297,38 @@ func (s *characterService) RegenerateStats(character *domain.Character) (*domain
 
 	s.appLogger.Info("Character stats regenerated", "char_id", character.ID, "mp_regened", mpToRegen)
 	return updatedChar, nil
+}
+
+func (s *characterService) AdvanceTutorialStep(playerID, characterID uint) (*domain.Character, error) {
+	// 1. ดึงข้อมูลตัวละคร และตรวจสอบความเป็นเจ้าของ
+	char, err := s.GetCharacterByID(playerID, characterID) // ใช้ฟังก์ชันเดิมที่เรามีอยู่แล้ว สะดวกมาก!
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. อัปเดตค่า TutorialStep
+	// (เราอาจจะใส่ Logic ที่ซับซ้อนกว่านี้ได้ในอนาคต แต่ตอนนี้แค่ +1 ไปก่อน)
+	if char.TutorialStep < domain.TutorialStepCompleted {
+		char.TutorialStep++
+		s.appLogger.Info("Advancing tutorial step", "char_id", char.ID, "new_step", char.TutorialStep)
+	}
+
+	// 3. บันทึกข้อมูลที่อัปเดตแล้วกลับลง DB
+	return s.repoCharacter.Save(char)
+}
+
+func (s *characterService) SkipTutorial(playerID, characterID uint) (*domain.Character, error) {
+	// 1. ดึงข้อมูลตัวละคร และตรวจสอบความเป็นเจ้าของ
+	char, err := s.GetCharacterByID(playerID, characterID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. ตั้งค่าให้เป็น "จบการศึกษา" ทันที
+	char.TutorialStep = domain.TutorialStepCompleted
+	s.appLogger.Info("Skipping tutorial", "char_id", char.ID)
+
+
+	// 3. บันทึกข้อมูลที่อัปเดตแล้วกลับลง DB
+	return s.repoCharacter.Save(char)
 }

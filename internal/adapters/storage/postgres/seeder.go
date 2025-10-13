@@ -45,6 +45,11 @@ func Seed(db *gorm.DB) error {
 		if err := seedGameConfigs(tx); err != nil {
 			return err
 		}
+		// --- 6. GameConfigs ---
+		if err := seedEnemies(tx); err != nil {
+			log.Printf("Failed to seed enemies: %v", err)
+			return err
+		}
 
 		log.Println("Database seeding process finished successfully.")
 		return nil
@@ -795,5 +800,115 @@ func seedGameConfigs(tx *gorm.DB) error {
 	}).Create(&configs).Error; err != nil {
 		return err
 	}
+	return nil
+}
+
+func seedEnemies(tx *gorm.DB) error {
+	log.Println("Seeding/Updating enemies and their AI...")
+
+	// ========================================================================
+	// ENEMY 1: TRAINING GOLEM (POTENCY) - สำหรับผู้เล่นสาย S
+	// ========================================================================
+	golemP := domain.Enemy{
+		ID:           1,
+		Name:         "TRAINING_GOLEM_POTENCY",
+		DisplayNames: datatypes.JSON(`{"en": "Potency Training Golem", "th": "โกเลมพลังงานฝึกหัด"}`), // ⭐️ ชื่อใหม่!
+		ElementID:    4,                                                                              // Potency
+		Level:        1,
+		MaxHP:        250,
+		Initiative:   40,
+		MaxEndurance: 100,
+	}
+	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&golemP)
+	abilitiesP := []domain.EnemyAbility{
+		{ID: 1, EnemyID: 1, Name: "P_PUNCH", DisplayNames: datatypes.JSON(`{"en": "Punch", "th": "หมัดตรง"}`), APCost: 1, EffectsJSON: datatypes.JSON(`[{"effect_id": 1, "value": 20}]`)},
+		{ID: 2, EnemyID: 1, Name: "P_TREMOR", DisplayNames: datatypes.JSON(`{"en": "Tremor", "th": "คลื่นพลัง"}`), APCost: 3, EffectsJSON: datatypes.JSON(`[{"effect_id": 1, "value": 40}, {"effect_id": 301, "value": -10, "duration": 2}]`)},
+	}
+	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&abilitiesP)
+	tx.Where("enemy_id = ?", 1).Delete(&domain.EnemyAI{})
+	aiRulesP := []domain.EnemyAI{
+		{EnemyID: 1, Priority: 1, Condition: domain.AIConditionTurnIs, ConditionValue: 2, Action: domain.AIActionUseAbility, Target: domain.AITargetPlayer, AbilityToUseID: &abilitiesP[1].ID},
+		{EnemyID: 1, Priority: 99, Condition: domain.AIConditionAlways, Action: domain.AIActionUseAbility, Target: domain.AITargetPlayer, AbilityToUseID: &abilitiesP[0].ID},
+	}
+	tx.Create(&aiRulesP)
+
+	// ========================================================================
+	// ENEMY 2: TRAINING GOLEM (SOLIDITY) - สำหรับผู้เล่นสาย L
+	// ========================================================================
+	golemS := domain.Enemy{
+		ID:           2,
+		Name:         "TRAINING_GOLEM_SOLIDITY",
+		DisplayNames: datatypes.JSON(`{"en": "Solidity Training Golem", "th": "โกเลมศิลาฝึกหัด"}`), // ⭐️ ชื่อใหม่!
+		ElementID:    1,                                                                            // Solidity
+		Level:        1,
+		MaxHP:        300,
+		Initiative:   35,
+		MaxEndurance: 120,
+	}
+	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&golemS)
+	abilitiesS := []domain.EnemyAbility{
+		{ID: 3, EnemyID: 2, Name: "S_SLAP", DisplayNames: datatypes.JSON(`{"en": "Slap", "th": "ตบ"}`), APCost: 1, EffectsJSON: datatypes.JSON(`[{"effect_id": 1, "value": 15}]`)},
+		{ID: 4, EnemyID: 2, Name: "S_HARDEN", DisplayNames: datatypes.JSON(`{"en": "Harden", "th": "กายาหิน"}`), APCost: 2, EffectsJSON: datatypes.JSON(`[{"effect_id": 110, "target": "SELF", "duration": 2}]`)}, // สมมติ 110 คือ BUFF_DEFENSE
+	}
+	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&abilitiesS)
+	tx.Where("enemy_id = ?", 2).Delete(&domain.EnemyAI{})
+	aiRulesS := []domain.EnemyAI{
+		{EnemyID: 2, Priority: 1, Condition: domain.AIConditionSelfHPBelow, ConditionValue: 0.5, Action: domain.AIActionUseAbility, Target: domain.AITargetSelf, AbilityToUseID: &abilitiesS[1].ID},
+		{EnemyID: 2, Priority: 99, Condition: domain.AIConditionAlways, Action: domain.AIActionUseAbility, Target: domain.AITargetPlayer, AbilityToUseID: &abilitiesS[0].ID},
+	}
+	tx.Create(&aiRulesS)
+
+	// ========================================================================
+	// ENEMY 3: TRAINING GOLEM (LIQUIDITY) - สำหรับผู้เล่นสาย G
+	// ========================================================================
+	golemL := domain.Enemy{
+		ID:           3,
+		Name:         "TRAINING_GOLEM_LIQUIDITY",
+		DisplayNames: datatypes.JSON(`{"en": "Liquidity Training Golem", "th": "โกเลมวารีฝึกหัด"}`), // ⭐️ ชื่อใหม่!
+		ElementID:    2,                                                                             // Liquidity
+		Level:        1,
+		MaxHP:        220,
+		Initiative:   45,
+		MaxEndurance: 80,
+	}
+	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&golemL)
+	abilitiesL := []domain.EnemyAbility{
+		{ID: 5, EnemyID: 3, Name: "L_SPLASH", DisplayNames: datatypes.JSON(`{"en": "Splash", "th": "สาดน้ำ"}`), APCost: 2, EffectsJSON: datatypes.JSON(`[{"effect_id": 1, "value": 25}]`)},
+		{ID: 6, EnemyID: 3, Name: "L_REGEN", DisplayNames: datatypes.JSON(`{"en": "Regenerate", "th": "ฟื้นฟู"}`), APCost: 2, EffectsJSON: datatypes.JSON(`[{"effect_id": 100, "target": "SELF", "value": 20, "duration": 3}]`)},
+	}
+	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&abilitiesL)
+	tx.Where("enemy_id = ?", 3).Delete(&domain.EnemyAI{})
+	aiRulesL := []domain.EnemyAI{
+		{EnemyID: 3, Priority: 1, Condition: domain.AIConditionSelfHPBelow, ConditionValue: 0.5, Action: domain.AIActionUseAbility, Target: domain.AITargetSelf, AbilityToUseID: &abilitiesL[1].ID},
+		{EnemyID: 3, Priority: 99, Condition: domain.AIConditionAlways, Action: domain.AIActionUseAbility, Target: domain.AITargetPlayer, AbilityToUseID: &abilitiesL[0].ID},
+	}
+	tx.Create(&aiRulesL)
+
+	// ========================================================================
+	// ENEMY 4: TRAINING GOLEM (TEMPO) - สำหรับผู้เล่นสาย P
+	// ========================================================================
+	golemG := domain.Enemy{
+		ID:           4,
+		Name:         "TRAINING_GOLEM_TEMPO",
+		DisplayNames: datatypes.JSON(`{"en": "Tempo Training Golem", "th": "โกเลมวายุฝึกหัด"}`), // ⭐️ ชื่อใหม่!
+		ElementID:    3,                                                                         // Tempo
+		Level:        1,
+		MaxHP:        200,
+		Initiative:   55,
+		MaxEndurance: 70,
+	}
+	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&golemG)
+	abilitiesG := []domain.EnemyAbility{
+		{ID: 7, EnemyID: 4, Name: "G_WIND_SLASH", DisplayNames: datatypes.JSON(`{"en": "Wind Slash", "th": "คมลม"}`), APCost: 1, EffectsJSON: datatypes.JSON(`[{"effect_id": 1, "value": 25}]`)},
+		{ID: 8, EnemyID: 4, Name: "G_EVADE", DisplayNames: datatypes.JSON(`{"en": "Evade", "th": "หลบหลีก"}`), APCost: 2, EffectsJSON: datatypes.JSON(`[{"effect_id": 102, "target": "SELF", "value": 50, "duration": 1}]`)},
+	}
+	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&abilitiesG)
+	tx.Where("enemy_id = ?", 4).Delete(&domain.EnemyAI{})
+	aiRulesG := []domain.EnemyAI{
+		{EnemyID: 4, Priority: 1, Condition: domain.AIConditionTurnIs, ConditionValue: 2, Action: domain.AIActionUseAbility, Target: domain.AITargetSelf, AbilityToUseID: &abilitiesG[1].ID},
+		{EnemyID: 4, Priority: 99, Condition: domain.AIConditionAlways, Action: domain.AIActionUseAbility, Target: domain.AITargetPlayer, AbilityToUseID: &abilitiesG[0].ID},
+	}
+	tx.Create(&aiRulesG)
+
 	return nil
 }

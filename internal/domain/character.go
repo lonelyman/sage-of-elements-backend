@@ -18,6 +18,7 @@ type Character struct {
 	TalentG            int                          `gorm:"comment:แต้มพรสวรรค์ G" json:"talent_g"`
 	TalentP            int                          `gorm:"comment:แต้มพรสวรรค์ P" json:"talent_p"`
 	StatsUpdatedAt     time.Time                    `gorm:"autoCreateTime;comment:เวลาที่อัปเดตค่าพลังล่าสุด" json:"statsUpdatedAt"`
+	TutorialStep       int                          `gorm:"default:1;comment:ขั้นตอนของบทช่วยสอนที่ทำถึง" json:"tutorial_step"`
 	PrimaryElement     *Element                     `gorm:"foreignKey:PrimaryElementID;references:ID"`
 	Masteries          []*CharacterMastery          `gorm:"foreignKey:CharacterID;constraint:OnDelete:CASCADE;" json:"masteries"`
 	DimensionalSeal    []*DimensionalSealInventory  `gorm:"foreignKey:CharacterID;constraint:OnDelete:CASCADE;" json:"dimensionalSeal"`

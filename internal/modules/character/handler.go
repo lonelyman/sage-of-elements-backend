@@ -174,3 +174,35 @@ func (h *characterHandler) GetInventory(c *fiber.Ctx) error {
 	// 4. ส่ง Response กลับไป
 	return appresponse.Success(c, fiber.StatusOK, "Inventory retrieved successfully", inventoryResponse, nil)
 }
+
+func (h *characterHandler) AdvanceTutorial(c *fiber.Ctx) error {
+	// 1. ดึง PlayerID จาก Token และ CharacterID จาก URL
+	claims := c.Locals("user_claims").(*appauth.Claims)
+	charIDStr := c.Params("id")
+	charID, _ := strconv.ParseUint(charIDStr, 10, 32)
+
+	// 2. เรียกใช้ Service
+	updatedChar, err := h.service.AdvanceTutorialStep(claims.UserID, uint(charID))
+	if err != nil {
+		return err
+	}
+
+	// 3. ส่งข้อมูลตัวละครที่อัปเดตแล้วกลับไป
+	return appresponse.Success(c, fiber.StatusOK, "Tutorial step advanced", updatedChar, nil)
+}
+
+func (h *characterHandler) SkipTutorial(c *fiber.Ctx) error {
+	// 1. ดึง PlayerID จาก Token และ CharacterID จาก URL
+	claims := c.Locals("user_claims").(*appauth.Claims)
+	charIDStr := c.Params("id")
+	charID, _ := strconv.ParseUint(charIDStr, 10, 32)
+
+	// 2. เรียกใช้ Service
+	updatedChar, err := h.service.SkipTutorial(claims.UserID, uint(charID))
+	if err != nil {
+		return err
+	}
+
+	// 3. ส่งข้อมูลตัวละครที่อัปเดตแล้วกลับไป
+	return appresponse.Success(c, fiber.StatusOK, "Tutorial skipped", updatedChar, nil)
+}

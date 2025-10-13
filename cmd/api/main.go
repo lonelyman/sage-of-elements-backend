@@ -153,7 +153,7 @@ func main() {
 	matchGroup.Use(authMiddleware)
 
 	// --- Protected Routes ---
-
+	// test comment
 	// ลงทะเบียน Protected Routes
 	playerHandler.RegisterProtectedRoutes(playerGroup)
 	characterHandler.RegisterProtectedRoutes(characterGroup)

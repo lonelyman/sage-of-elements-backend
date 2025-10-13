@@ -151,7 +151,7 @@ func main() {
 	fusionGroup.Use(authMiddleware)
 	pveGroup.Use(authMiddleware)
 	matchGroup.Use(authMiddleware)
-
+	// comment out for test
 	// --- Protected Routes ---
 	// ลงทะเบียน Protected Routes
 	playerHandler.RegisterProtectedRoutes(playerGroup)

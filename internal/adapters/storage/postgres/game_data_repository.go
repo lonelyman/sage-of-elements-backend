@@ -1,6 +1,8 @@
 package postgres
 
 import (
+	"log"
+	"sage-of-elements-backend/internal/adapters/cache/redis"
 	"sage-of-elements-backend/internal/domain"
 	"sage-of-elements-backend/internal/modules/game_data"
 
@@ -9,13 +11,15 @@ import (
 
 // gameDataRepository คือ struct ที่ implement game_data.Repository interface
 type gameDataRepository struct {
-	db *gorm.DB
+	db          *gorm.DB
+	configCache *redis.GameConfigCacheRepository
 }
 
 // NewGameDataRepository คือฟังก์ชันสำหรับสร้าง Repository
-func NewGameDataRepository(db *gorm.DB) game_data.GameDataRepository {
+func NewGameDataRepository(db *gorm.DB, configCache *redis.GameConfigCacheRepository) game_data.GameDataRepository {
 	return &gameDataRepository{
-		db: db,
+		db:          db,
+		configCache: configCache,
 	}
 }
 
@@ -59,20 +63,49 @@ func (r *gameDataRepository) FindAllSpells() ([]domain.Spell, error) {
 	return spells, nil
 }
 
-// GetGameConfigValue ดึงค่า Config 1 ตัวจากตาราง game_configs ด้วย key
+// GetGameConfigValue จะถาม Cache ก่อนเสมอ!
 func (r *gameDataRepository) GetGameConfigValue(key string) (string, error) {
+	// 1. ถาม Cache ที่ถูกต้อง!
+	cachedValue, err := r.configCache.GetConfig(key)
+	if err != nil {
+		log.Printf("WARN: Redis error on GetConfig: %v. Falling back to DB.", err)
+		return r.getConfigFromDB(key)
+	}
+	if cachedValue != "" {
+		return cachedValue, nil // Cache Hit!
+	}
+
+	// 2. ถ้า Cache Miss...
+	log.Printf("WARN: Cache miss for key '%s'. Falling back to DB.", key)
+	return r.getConfigFromDB(key)
+}
+
+// getConfigFromDB คือฟังก์ชันลูกที่ใช้ถาม Database โดยตรง (โค้ดเดิมของน้องชาย)
+func (r *gameDataRepository) getConfigFromDB(key string) (string, error) {
 	var config domain.GameConfig
-	// ใช้ .Where("key = ?", key) เพื่อค้นหาแถวที่มี key ตรงกัน
-	// และใช้ .First(&config) เพื่อดึงข้อมูลแค่แถวเดียว
 	if err := r.db.Where("key = ?", key).First(&config).Error; err != nil {
-		// ถ้า GORM คืนค่า ErrRecordNotFound แปลว่าไม่เจอ key นั้น
 		if err == gorm.ErrRecordNotFound {
-			// เราจะคืนค่า string ว่างๆ กลับไป และไม่ถือว่าเป็น Error
 			return "", nil
 		}
-		// แต่ถ้าเป็น Error อื่นๆ (เช่น DB down) ก็ต้องส่ง Error กลับไป
 		return "", err
 	}
-	// ถ้าเจอ ก็คืนค่า Value กลับไป
 	return config.Value, nil
+}
+func (r *gameDataRepository) FindAllGameConfigs() ([]domain.GameConfig, error) {
+	var configs []domain.GameConfig
+	err := r.db.Find(&configs).Error
+	return configs, err
+}
+
+func (r *gameDataRepository) FindSpellByID(id uint) (*domain.Spell, error) {
+	var spell domain.Spell
+	// Preload "Effects.Effect" เพื่อให้เราดึงข้อมูล Effect ที่ซ้อนอยู่ข้างในมาด้วย
+	err := r.db.Preload("Effects.Effect").First(&spell, id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &spell, nil
 }

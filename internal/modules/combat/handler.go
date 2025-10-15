@@ -5,6 +5,7 @@ import (
 	"sage-of-elements-backend/internal/domain"
 	"sage-of-elements-backend/pkg/appauth"
 	"sage-of-elements-backend/pkg/apperrors"
+	"sage-of-elements-backend/pkg/applogger"
 	"sage-of-elements-backend/pkg/appresponse"
 	"sage-of-elements-backend/pkg/appvalidator"
 
@@ -18,32 +19,44 @@ type DeckSlotInput struct {
 	ElementID uint `json:"elementId" validate:"required,gte=5"`
 }
 
+type TrainingEnemyInput struct {
+	EnemyID uint `json:"enemy_id" validate:"required"`
+}
 type CreateMatchRequest struct {
 	CharacterID     uint                   `json:"character_id" validate:"required"`
 	MatchType       string                 `json:"match_type" validate:"required,oneof=TRAINING PVE_STAGE"`
-	StageID         *uint                  `json:"stage_id,omitempty"`         // Optional, needed for PVE_STAGE
-	TrainingEnemies []domain.StageEnemy    `json:"training_enemies,omitempty"` // Optional, needed for TRAINING
-	DeckID          *uint                  `json:"deck_id,omitempty"`          // Optional, for using a saved deck
-	Deck            []DeckSlotInput        `json:"deck,omitempty"`             // Optional, for sending a custom deck
+	StageID         *uint                  `json:"stage_id,omitempty"`
+	TrainingEnemies []TrainingEnemyInput   `json:"training_enemies,omitempty" validate:"dive"`
+	DeckID          *uint                  `json:"deck_id,omitempty"`
+	Deck            []DeckSlotInput        `json:"deck,omitempty" validate:"max=8,dive"`
 	Modifiers       *domain.MatchModifiers `json:"modifiers,omitempty"`
+}
+
+type PerformActionRequest struct {
+	ActionType string  `json:"action_type" validate:"required,oneof=END_TURN DRAW_ELEMENT CAST_SPELL"`
+	ElementID  *uint   `json:"element_id,omitempty"` // สำหรับ DRAW_ELEMENT
+	SpellID    *uint   `json:"spell_id,omitempty"`   // สำหรับ CAST_SPELL
+	TargetID   *string `json:"target_id,omitempty"`  // สำหรับ CAST_SPELL
 }
 
 // --- Handler ---
 type CombatHandler struct {
+	appLogger applogger.Logger
 	validator *validator.Validate
 	service   CombatService
 }
 
-func NewCombatHandler(validator *validator.Validate, service CombatService) *CombatHandler {
+func NewCombatHandler(appLogger applogger.Logger, validator *validator.Validate, service CombatService) *CombatHandler {
 	return &CombatHandler{
+		appLogger: appLogger,
 		validator: validator,
 		service:   service,
 	}
 }
 
 func (h *CombatHandler) RegisterProtectedRoutes(router fiber.Router) {
-
 	router.Post("/", h.CreateMatch)
+	router.Post("/:id/actions", h.PerformAction)
 }
 
 // --- Handler Functions ---
@@ -63,10 +76,36 @@ func (h *CombatHandler) CreateMatch(c *fiber.Ctx) error {
 
 	// 3. เรียกใช้ Service เพื่อสร้างห้องต่อสู้
 	newMatch, err := h.service.CreateMatch(playerID, *req)
+	h.appLogger.Dump("newMatch:", newMatch, playerID)
 	if err != nil {
 		return err // ส่งต่อให้ Error Handler กลาง
 	}
 
 	// 4. ส่งสถานะของห้องที่เพิ่งสร้างเสร็จกลับไป
 	return appresponse.Success(c, fiber.StatusCreated, "Match created successfully", newMatch, nil)
+}
+
+// ✨⭐️ สร้าง Handler Function ใหม่สำหรับรับ Action! ⭐️✨
+func (h *CombatHandler) PerformAction(c *fiber.Ctx) error {
+	// 1. ดึง PlayerID จาก Token และ MatchID จาก URL
+	claims := c.Locals("user_claims").(*appauth.Claims)
+	matchID := c.Params("id")
+
+	// 2. Parse & Validate Body
+	req := new(PerformActionRequest)
+	if err := c.BodyParser(req); err != nil {
+		return apperrors.InvalidFormatError("Cannot parse JSON", nil)
+	}
+	if validationResult := appvalidator.Validate(h.validator, req); !validationResult.IsValid {
+		return c.Status(fiber.StatusBadRequest).JSON(validationResult)
+	}
+
+	// 3. เรียกใช้ Service เพื่อประมวลผล Action
+	updatedMatch, err := h.service.PerformAction(claims.UserID, matchID, *req)
+	if err != nil {
+		return err
+	}
+
+	// 4. ส่งสถานะ Match ที่อัปเดตแล้วกลับไป
+	return appresponse.Success(c, fiber.StatusOK, "Action performed successfully", updatedMatch, nil)
 }

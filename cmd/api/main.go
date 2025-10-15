@@ -76,8 +76,10 @@ func main() {
 	playerSvc := player.NewPlayerService(appLogger, authSvc, playerRepo)
 	playerHandler := player.NewPlayerHandler(appValidator, playerSvc)
 
-	gameDataDbRepo := postgres.NewGameDataRepository(db)
-	gameDataCacheRepo := redis.NewGameDataCacheRepository(redisClient)
+	gameConfigCache := redis.NewGameConfigCacheRepository(redisClient) // สำหรับ Game Configs
+	gameDataCacheRepo := redis.NewGameDataCacheRepository(redisClient) // สำหรับ Master Data ก้อนใหญ่
+
+	gameDataDbRepo := postgres.NewGameDataRepository(db, gameConfigCache)
 	gameDataSvc := game_data.NewGameDataService(appLogger, gameDataDbRepo, gameDataCacheRepo)
 	gameDataHandler := game_data.NewGameDataHandler(gameDataSvc)
 
@@ -99,8 +101,8 @@ func main() {
 
 	enemyRepo := postgres.NewEnemyRepository(db)
 	combatRepo := postgres.NewCombatRepository(db)
-	combatSvc := combat.NewCombatService(appLogger, combatRepo, characterRepo, enemyRepo, pveRepo)
-	combatHandler := combat.NewCombatHandler(appValidator, combatSvc)
+	combatSvc := combat.NewCombatService(appLogger, combatRepo, characterRepo, enemyRepo, pveRepo, gameDataDbRepo)
+	combatHandler := combat.NewCombatHandler(appLogger, appValidator, combatSvc)
 
 	// --- 4. Setup Fiber App & Routes ---
 	app := fiber.New(fiber.Config{
@@ -131,6 +133,16 @@ func main() {
 	apiV1 := app.Group("/api/v1")
 	apiV1.Get("/health", func(c *fiber.Ctx) error {
 		return c.Status(200).JSON(fiber.Map{"status": "ok"})
+	})
+
+	apiV1.Get("/debug/enemies", func(c *fiber.Ctx) error {
+		// เราจะเรียกใช้ enemyRepo โดยตรงเลย!
+		enemies, err := enemyRepo.FindAll()
+		if err != nil {
+			return err
+		}
+		// ส่งผลลัพธ์ที่เห็นกลับไปเป็น JSON
+		return c.JSON(enemies)
 	})
 
 	// --- สร้าง Group หลักสำหรับแต่ละ Module ---

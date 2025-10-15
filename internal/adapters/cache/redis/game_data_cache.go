@@ -11,17 +11,17 @@ import (
 
 const masterDataKey = "master_data:v1" // <-- เราใส่เวอร์ชันไว้ด้วย เผื่ออนาคตมีการเปลี่ยนโครงสร้างข้อมูล
 
-type gameDataCacheRepository struct {
+type GameDataCacheRepository struct {
 	client *redis.Client
 }
 
 // NewGameDataCacheRepository คือฟังก์ชันสำหรับสร้าง Cache Repository
 func NewGameDataCacheRepository(client *redis.Client) game_data.CacheRepository {
-	return &gameDataCacheRepository{client: client}
+	return &GameDataCacheRepository{client: client}
 }
 
 // GetMasterData พยายามดึงข้อมูล Master Data จาก Redis Cache
-func (r *gameDataCacheRepository) GetMasterData() (*game_data.MasterDataResponse, error) {
+func (r *GameDataCacheRepository) GetMasterData() (*game_data.MasterDataResponse, error) {
 	// ใช้ client.Get เพื่อดึงข้อมูลจาก key "master_data:v1"
 	val, err := r.client.Get(context.Background(), masterDataKey).Result()
 
@@ -43,7 +43,7 @@ func (r *gameDataCacheRepository) GetMasterData() (*game_data.MasterDataResponse
 }
 
 // SetMasterData ทำการบันทึก Master Data ลงใน Redis Cache
-func (r *gameDataCacheRepository) SetMasterData(data *game_data.MasterDataResponse, expiration time.Duration) error {
+func (r *GameDataCacheRepository) SetMasterData(data *game_data.MasterDataResponse, expiration time.Duration) error {
 	// 1. แปลง Struct ของเราให้กลายเป็น JSON string
 	bytes, err := json.Marshal(data)
 	if err != nil {

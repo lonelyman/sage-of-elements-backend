@@ -10,4 +10,6 @@ type GameDataRepository interface {
 	FindAllSpells() ([]domain.Spell, error)
 
 	GetGameConfigValue(key string) (string, error)
+	FindAllGameConfigs() ([]domain.GameConfig, error)
+	FindSpellByID(id uint) (*domain.Spell, error)
 }

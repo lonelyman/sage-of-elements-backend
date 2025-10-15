@@ -50,6 +50,10 @@ func Seed(db *gorm.DB) error {
 			log.Printf("Failed to seed enemies: %v", err)
 			return err
 		}
+		if err := seedElementalMatchups(tx); err != nil {
+			log.Printf("Failed to seed elemental_matchups: %v", err)
+			return err
+		}
 
 		log.Println("Database seeding process finished successfully.")
 		return nil
@@ -765,8 +769,14 @@ func seedSpells(tx *gorm.DB) error {
 }
 
 func seedGameConfigs(tx *gorm.DB) error {
+	log.Println("Seeding/Updating game_configs...")
 
 	configs := []domain.GameConfig{
+		// ========================================================================
+		// General Game Rules
+		// ========================================================================
+		{Key: "GAME_VERSION", Value: "1.0.0", Description: "The current version of the game data."},
+
 		// ========================================================================
 		// Character Stat Calculation Rules
 		// ========================================================================
@@ -787,19 +797,25 @@ func seedGameConfigs(tx *gorm.DB) error {
 		{Key: "TALENT_SECONDARY_ALLOCATION", Value: "3", Description: "แต้มพรสวรรค์ที่จะมอบให้ธาตุรอง"},
 
 		// ========================================================================
-		// Combat System & Other Rules (from previous agreements)
+		// Combat System Rules
 		// ========================================================================
-		{Key: "GAME_VERSION", Value: "1.0.0", Description: "The current version of the game data."},
-		{Key: "COMBAT_AP_PER_TURN", Value: "3", Description: "The amount of Action Points a player gains at the start of their turn."},
-		{Key: "COMBAT_MAX_AP", Value: "6", Description: "The maximum amount of Action Points a player can accumulate."},
+		{Key: "COMBAT_AP_PER_TURN", Value: "3", Description: "จำนวน AP ที่ผู้เล่นได้รับเมื่อเริ่มเทิร์น"},
+		{Key: "COMBAT_BASE_AP_CAP", Value: "6", Description: "ขีดจำกัด AP สูงสุดพื้นฐานที่สามารถสะสมได้"},
+
+		// ========================================================================
+		// Resource Regeneration Rules
+		// ========================================================================
+		{Key: "PASSIVE_MP_REGEN_PER_MINUTE", Value: "5", Description: "จำนวน MP ที่ฟื้นฟูอัตโนมัติทุกๆ 1 นาที (นอกการต่อสู้)"},
 	}
 
+	// ใช้ OnConflict เพื่อให้สามารถรัน Seeder นี้ซ้ำได้โดยไม่ Error
 	if err := tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "key"}},
 		DoUpdates: clause.AssignmentColumns([]string{"value", "description"}),
 	}).Create(&configs).Error; err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -911,4 +927,39 @@ func seedEnemies(tx *gorm.DB) error {
 	tx.Create(&aiRulesG)
 
 	return nil
+}
+
+func seedElementalMatchups(tx *gorm.DB) error {
+	log.Println("Seeding/Updating elemental matchups...")
+
+	matchups := []domain.ElementalMatchup{
+		// --- S (ID:1) Attacking ---
+		{AttackingElementID: 1, DefendingElementID: 1, Modifier: 1.0}, // S vs S
+		{AttackingElementID: 1, DefendingElementID: 2, Modifier: 0.8}, // S vs L (แพ้ทางเล็กน้อย)
+		{AttackingElementID: 1, DefendingElementID: 3, Modifier: 1.0}, // S vs G
+		{AttackingElementID: 1, DefendingElementID: 4, Modifier: 1.5}, // S vs P (ชนะทางขาดลอย!)
+
+		// --- L (ID:2) Attacking ---
+		{AttackingElementID: 2, DefendingElementID: 1, Modifier: 1.3}, // L vs S (ชนะทาง)
+		{AttackingElementID: 2, DefendingElementID: 2, Modifier: 1.0}, // L vs L
+		{AttackingElementID: 2, DefendingElementID: 3, Modifier: 0.7}, // L vs G (แพ้ทางหนัก)
+		{AttackingElementID: 2, DefendingElementID: 4, Modifier: 1.0}, // L vs P
+
+		// --- G (ID:3) Attacking ---
+		{AttackingElementID: 3, DefendingElementID: 1, Modifier: 1.0}, // G vs S
+		{AttackingElementID: 3, DefendingElementID: 2, Modifier: 1.2}, // G vs L (ชนะทางแบบคุมเกม)
+		{AttackingElementID: 3, DefendingElementID: 3, Modifier: 1.0}, // G vs G
+		{AttackingElementID: 3, DefendingElementID: 4, Modifier: 0.8}, // G vs P (แพ้ทางเล็กน้อย)
+
+		// --- P (ID:4) Attacking ---
+		{AttackingElementID: 4, DefendingElementID: 1, Modifier: 0.7}, // P vs S (แพ้ทางหนัก)
+		{AttackingElementID: 4, DefendingElementID: 2, Modifier: 1.0}, // P vs L
+		{AttackingElementID: 4, DefendingElementID: 3, Modifier: 1.4}, // P vs G (ชนะทางรุนแรง)
+		{AttackingElementID: 4, DefendingElementID: 4, Modifier: 1.0}, // P vs P
+	}
+
+	return tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "attacking_element_id"}, {Name: "defending_element_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"modifier"}),
+	}).Create(&matchups).Error
 }

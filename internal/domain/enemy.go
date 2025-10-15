@@ -1,3 +1,4 @@
+// file: internal/domain/enemy.go
 package domain
 
 import "gorm.io/datatypes"
@@ -14,6 +15,12 @@ type Enemy struct {
 	MaxEndurance int            `gorm:"not null;comment:ค่าความอดทนสูงสุดพื้นฐาน"`
 	ElementID    uint           `gorm:"comment:ID ของธาตุประจำตัวศัตรู (FK to elements)"`
 	Element      *Element       `gorm:"foreignKey:ElementID;references:ID"`
+
+	// --- ⭐️ เพิ่ม 3 บรรทัดนี้เข้ามาเพื่อสร้าง "ความสัมพันธ์"! ⭐️ ---
+	// นี่คือ "สะพาน" ที่บอก GORM ว่า Enemy มี Abilities, AI, และ Loots ได้หลายอัน
+	Abilities []*EnemyAbility `gorm:"foreignKey:EnemyID;constraint:OnDelete:CASCADE;"`
+	AI        []*EnemyAI      `gorm:"foreignKey:EnemyID;constraint:OnDelete:CASCADE;"`
+	Loots     []*EnemyLoot    `gorm:"foreignKey:EnemyID;constraint:OnDelete:CASCADE;"`
 }
 
 // EnemyAbility คือท่าโจมตีหรือความสามารถ 1 อย่างของศัตรู

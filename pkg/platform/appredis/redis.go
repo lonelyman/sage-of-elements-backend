@@ -12,7 +12,6 @@ import (
 // NewRedisConnection สร้างการเชื่อมต่อกับ Redis
 func NewConnection(cfg appconfig.RedisConfig, logger applogger.Logger) (*redis.Client, error) {
 	redisHost := fmt.Sprintf("%s:%s", cfg.Host, cfg.Port)
-	logger.Dump(cfg)
 	client := redis.NewClient(&redis.Options{
 		Addr:     redisHost,
 		Password: cfg.Password,

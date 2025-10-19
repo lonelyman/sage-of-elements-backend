@@ -81,3 +81,8 @@ func (r *deckRepository) Update(deckID uint, name string, slots []*domain.DeckSl
 	// ดึงข้อมูล Deck ที่อัปเดตแล้วทั้งหมดกลับไปให้ Service
 	return r.FindByID(deckID)
 }
+
+func (r *deckRepository) Delete(deckID uint) error {
+	// GORM จะจัดการลบ Deck และ Slots ที่ผูกกัน (constraint:OnDelete:CASCADE) ให้โดยอัตโนมัติ
+	return r.db.Delete(&domain.Deck{}, deckID).Error
+}

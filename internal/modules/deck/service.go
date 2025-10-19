@@ -2,6 +2,7 @@
 package deck
 
 import (
+	"fmt"
 	"sage-of-elements-backend/internal/domain"
 	"sage-of-elements-backend/internal/modules/character"
 	"sage-of-elements-backend/pkg/apperrors"
@@ -14,6 +15,7 @@ type DeckService interface {
 	CreateDeck(playerID, characterID uint, name string) (*domain.Deck, error)
 	GetDecksByCharacterID(playerID, characterID uint) ([]domain.Deck, error)
 	UpdateDeck(playerID, deckID uint, req UpdateDeckRequest) (*domain.Deck, error)
+	DeleteDeck(playerID, deckID uint) error
 }
 
 // --- Implementation (การทำงานจริง) ---
@@ -83,21 +85,35 @@ func (s *deckService) GetDecksByCharacterID(playerID, characterID uint) ([]domai
 }
 
 func (s *deckService) UpdateDeck(playerID, deckID uint, req UpdateDeckRequest) (*domain.Deck, error) {
-	// 1. ตรวจสอบความเป็นเจ้าของ Deck (ซับซ้อนขึ้นนิดหน่อย)
+	// 1. ตรวจสอบความเป็นเจ้าของ Deck (เหมือนเดิม)
 	deck, err := s.deckRepo.FindByID(deckID)
 	if err != nil || deck == nil {
 		return nil, apperrors.NotFoundError("deck not found")
 	}
-	// เช็คผ่าน Character ที่ผูกกับ Deck นั้นๆ
 	char, _ := s.characterRepo.FindByID(deck.CharacterID)
 	if char == nil || char.PlayerID != playerID {
 		return nil, apperrors.PermissionDeniedError("you do not have permission to edit this deck")
 	}
 
-	// 2. TODO (อนาคต): ตรวจสอบว่าธาตุ T1 ที่ส่งมาใน `req.Slots`...
-	// ผู้เล่นเคย "ค้นพบ" ใน JournalDiscoveries แล้วจริงๆ หรือไม่ (ป้องกันการโกง)
+	// --- ✨⭐️ เพิ่ม "ด่านตรวจสอบ" ใหม่ตรงนี้! ⭐️✨ ---
+	// 2. ตรวจสอบว่า Client ส่ง Slot ซ้ำซ้อนมาหรือไม่
+	slotTracker := make(map[int]bool) // สร้าง "สมุดจด"
+	for _, s := range req.Slots {
+		if s.SlotNum < 1 || s.SlotNum > 8 {
+			return nil, apperrors.New(400, "INVALID_SLOT_NUMBER", fmt.Sprintf("Slot number %d is out of range (must be 1-8)", s.SlotNum))
+		}
 
-	// 3. แปลงข้อมูลจาก Request DTO ให้เป็น Domain Model
+		if slotTracker[s.SlotNum] {
+			// ถ้า "สมุดจด" บอกว่าเคยเจอช่องนี้แล้ว...
+			return nil, apperrors.New(400, "DUPLICATE_SLOT", fmt.Sprintf("Slot number %d is duplicated", s.SlotNum))
+		}
+		slotTracker[s.SlotNum] = true // "จด" ว่าเจอช่องนี้แล้ว
+	}
+	// ---------------------------------------------
+
+	// 3. TODO (อนาคต): ตรวจสอบว่าธาตุ T1 ที่ส่งมา... ผู้เล่น "ค้นพบ" แล้วจริงๆ
+
+	// 4. แปลงข้อมูล (เหมือนเดิม)
 	var newSlots []*domain.DeckSlot
 	for _, s := range req.Slots {
 		newSlots = append(newSlots, &domain.DeckSlot{
@@ -106,6 +122,22 @@ func (s *deckService) UpdateDeck(playerID, deckID uint, req UpdateDeckRequest) (
 		})
 	}
 
-	// 4. สั่งให้ Repository ทำการอัปเดต!
+	// 5. สั่งให้ Repository ทำการอัปเดต!
 	return s.deckRepo.Update(deckID, req.Name, newSlots)
+}
+
+func (s *deckService) DeleteDeck(playerID, deckID uint) error {
+	// 1. ตรวจสอบความเป็นเจ้าของ Deck
+	deck, err := s.deckRepo.FindByID(deckID)
+	if err != nil || deck == nil {
+		return apperrors.NotFoundError("deck not found")
+	}
+	// เช็คผ่าน Character ที่ผูกกับ Deck
+	char, _ := s.characterRepo.FindByID(deck.CharacterID)
+	if char == nil || char.PlayerID != playerID {
+		return apperrors.PermissionDeniedError("you do not have permission to delete this deck")
+	}
+
+	// 2. สั่งให้ Repository ลบ
+	return s.deckRepo.Delete(deckID)
 }

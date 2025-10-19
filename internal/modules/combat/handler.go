@@ -33,10 +33,16 @@ type CreateMatchRequest struct {
 }
 
 type PerformActionRequest struct {
-	ActionType string  `json:"action_type" validate:"required,oneof=END_TURN DRAW_ELEMENT CAST_SPELL"`
-	ElementID  *uint   `json:"element_id,omitempty"` // สำหรับ DRAW_ELEMENT
-	SpellID    *uint   `json:"spell_id,omitempty"`   // สำหรับ CAST_SPELL
-	TargetID   *string `json:"target_id,omitempty"`  // สำหรับ CAST_SPELL
+	ActionType string  `json:"action_type" validate:"required,oneof=END_TURN DRAW_CHARGE CAST_SPELL EMERGENCY_FUSION"`
+	CastMode   string  `json:"cast_mode,omitempty" validate:"omitempty,oneof=INSTANT CHARGE OVERCHARGE"`
+	ElementID  *uint   `json:"element_id,omitempty"` // ⭐️ สำหรับ "DRAW_CHARGE" หรือ "EMERGENCY_FUSION"
+	SpellID    *uint   `json:"spell_id,omitempty"`   // ⭐️ สำหรับ "CAST_SPELL"
+	TargetID   *string `json:"target_id,omitempty"`  // ⭐️ สำหรับ "CAST_SPELL"
+}
+
+type PerformActionResponse struct {
+	UpdatedMatch    *domain.CombatMatch  `json:"updatedMatch"`
+	PerformedAction PerformActionRequest `json:"performedAction"`
 }
 
 // --- Handler ---
@@ -76,7 +82,6 @@ func (h *CombatHandler) CreateMatch(c *fiber.Ctx) error {
 
 	// 3. เรียกใช้ Service เพื่อสร้างห้องต่อสู้
 	newMatch, err := h.service.CreateMatch(playerID, *req)
-	h.appLogger.Dump("newMatch:", newMatch, playerID)
 	if err != nil {
 		return err // ส่งต่อให้ Error Handler กลาง
 	}
@@ -87,25 +92,21 @@ func (h *CombatHandler) CreateMatch(c *fiber.Ctx) error {
 
 // ✨⭐️ สร้าง Handler Function ใหม่สำหรับรับ Action! ⭐️✨
 func (h *CombatHandler) PerformAction(c *fiber.Ctx) error {
-	// 1. ดึง PlayerID จาก Token และ MatchID จาก URL
 	claims := c.Locals("user_claims").(*appauth.Claims)
 	matchID := c.Params("id")
 
-	// 2. Parse & Validate Body
-	req := new(PerformActionRequest)
+	req := new(PerformActionRequest) // <-- ใช้ DTO จาก service.go
 	if err := c.BodyParser(req); err != nil {
 		return apperrors.InvalidFormatError("Cannot parse JSON", nil)
 	}
 	if validationResult := appvalidator.Validate(h.validator, req); !validationResult.IsValid {
-		return c.Status(fiber.StatusBadRequest).JSON(validationResult)
+		return apperrors.ValidationError("Validation failed", validationResult.Errors)
 	}
 
-	// 3. เรียกใช้ Service เพื่อประมวลผล Action
-	updatedMatch, err := h.service.PerformAction(claims.UserID, matchID, *req)
+	actionResponse, err := h.service.PerformAction(claims.UserID, matchID, *req)
 	if err != nil {
 		return err
 	}
 
-	// 4. ส่งสถานะ Match ที่อัปเดตแล้วกลับไป
-	return appresponse.Success(c, fiber.StatusOK, "Action performed successfully", updatedMatch, nil)
+	return appresponse.Success(c, fiber.StatusOK, "Action performed successfully", actionResponse, nil)
 }

@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"fmt"
 	"log"
 	"sage-of-elements-backend/internal/adapters/cache/redis"
 	"sage-of-elements-backend/internal/domain"
@@ -108,4 +109,51 @@ func (r *gameDataRepository) FindSpellByID(id uint) (*domain.Spell, error) {
 		return nil, err
 	}
 	return &spell, nil
+}
+
+func (r *gameDataRepository) FindAllElementalMatchups() ([]domain.ElementalMatchup, error) {
+	var matchups []domain.ElementalMatchup
+	err := r.db.Find(&matchups).Error
+	return matchups, err
+}
+
+func (r *gameDataRepository) GetMatchupModifier(attackerID, defenderID uint) (string, error) {
+	// 1. ถาม "ผู้เชี่ยวชาญ Redis" (Cache) ก่อน!
+	cachedValue, err := r.configCache.GetMatchupModifier(attackerID, defenderID)
+	if err != nil { // ถ้า Redis down
+		log.Printf("WARN: Redis error on GetMatchupModifier: %v. Falling back to DB.", err)
+		return r.getMatchupModifierFromDB(attackerID, defenderID) // ไปถาม DB แทน
+	}
+	if cachedValue != "" {
+		return cachedValue, nil // Cache Hit! เจอแล้ว ส่งกลับเลย!
+	}
+
+	// 2. ถ้า Cache Miss (ซึ่งไม่ควรเกิด), ก็มีแผนสำรองไปถาม DB
+	log.Printf("WARN: Cache miss for matchup: %d vs %d. Falling back to DB.", attackerID, defenderID)
+	return r.getMatchupModifierFromDB(attackerID, defenderID)
+}
+
+// ฟังก์ชันลูกสำหรับถาม DB โดยตรง
+func (r *gameDataRepository) getMatchupModifierFromDB(attackerID, defenderID uint) (string, error) {
+	var matchup domain.ElementalMatchup
+	if err := r.db.Where("attacking_element_id = ? AND defending_element_id = ?", attackerID, defenderID).First(&matchup).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return "1.0", nil // ถ้าไม่เจอกฎ ให้คืนค่าปกติ
+		}
+		return "1.0", err
+	}
+	return fmt.Sprintf("%f", matchup.Modifier), nil
+}
+
+func (r *gameDataRepository) FindRecipeByOutputElementID(elementID uint) (*domain.Recipe, error) {
+	var recipe domain.Recipe
+	// Preload "Ingredients" เพื่อให้เรารู้ว่ามันมีส่วนประกอบอะไรบ้าง
+	err := r.db.Preload("Ingredients").Where("output_element_id = ?", elementID).First(&recipe).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil // หาไม่เจอ ไม่ใช่ Error
+		}
+		return nil, err
+	}
+	return &recipe, nil
 }

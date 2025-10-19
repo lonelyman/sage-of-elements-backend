@@ -46,17 +46,33 @@ func (r *combatRepository) FindMatchByID(matchID string) (*domain.CombatMatch, e
 		Preload("Combatants.Enemy.Element").
 		Preload("Combatants.Enemy.Abilities").       // <-- ⭐️ สั่งให้โหลดท่าโจมตีของศัตรูมาด้วย!
 		Preload("Combatants.Enemy.AI.AbilityToUse"). // <-- ⭐️ สั่งให้โหลดกฎ AI และท่าที่ผูกกับกฎนั้นมาด้วย!
+		Preload("Combatants.Deck").
 		Where("id = ?", matchID).
 		First(&match).Error
 	return &match, err
 }
 
-// UpdateMatch บันทึกสถานะล่าสุดของ Match ทั้งหมดลง Database
+// UpdateMatch บันทึกสถานะล่าสุดของ Match และ Combatant ทุกตัว
 func (r *combatRepository) UpdateMatch(match *domain.CombatMatch) (*domain.CombatMatch, error) {
-	// ใช้ .Session(&gorm.Session{FullSaveAssociations: true}) เพื่อให้ GORM อัปเดตข้อมูลใน Combatants ด้วย
-	if err := r.db.Session(&gorm.Session{FullSaveAssociations: true}).Save(match).Error; err != nil {
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		// 1. บันทึก Combatant ทุกตัวก่อน
+		for i := range match.Combatants {
+			if err := tx.Save(match.Combatants[i]).Error; err != nil {
+				return err
+			}
+		}
+
+		// 2. บันทึก Match หลักทีหลัง
+		if err := tx.Save(match).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+
+	if err != nil {
 		return nil, err
 	}
-	// ดึงข้อมูลล่าสุดกลับมาอีกครั้งเพื่อให้แน่ใจว่าทุกอย่างถูกต้อง
+
+	// ดึงข้อมูลล่าสุดทั้งหมดกลับมาอีกครั้ง (เหมือนเดิม)
 	return r.FindMatchByID(match.ID.String())
 }

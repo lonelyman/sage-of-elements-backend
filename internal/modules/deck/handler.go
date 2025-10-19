@@ -44,10 +44,10 @@ func NewDeckHandler(validator *validator.Validate, service DeckService) *deckHan
 }
 
 func (h *deckHandler) RegisterProtectedRoutes(router fiber.Router) {
-	deckRoutes := router.Group("/decks")
-	deckRoutes.Post("/", h.CreateDeck)
-	deckRoutes.Get("/", h.GetDecks)
-	deckRoutes.Put("/:id", h.UpdateDeck)
+	router.Post("/", h.CreateDeck)
+	router.Get("/", h.GetDecks)
+	router.Put("/:id", h.UpdateDeck)
+	router.Delete("/:id", h.DeleteDeck)
 }
 
 func (h *deckHandler) CreateDeck(c *fiber.Ctx) error {
@@ -109,4 +109,25 @@ func (h *deckHandler) UpdateDeck(c *fiber.Ctx) error {
 		return err
 	}
 	return appresponse.Success(c, fiber.StatusOK, "Deck updated successfully", updatedDeck, nil)
+}
+
+func (h *deckHandler) DeleteDeck(c *fiber.Ctx) error {
+	// 1. ดึง PlayerID จาก Token
+	claims := c.Locals("user_claims").(*appauth.Claims)
+	playerID := claims.UserID
+
+	// 2. ดึง DeckID จาก URL Param
+	deckIDStr := c.Params("id")
+	deckID, err := strconv.ParseUint(deckIDStr, 10, 32)
+	if err != nil {
+		return apperrors.InvalidFormatError("Invalid deck ID format", nil)
+	}
+
+	// 3. เรียกใช้ Service เพื่อลบ
+	if err := h.service.DeleteDeck(playerID, uint(deckID)); err != nil {
+		return err // ส่งต่อให้ Error Handler กลาง
+	}
+
+	// 4. ส่ง Response 204 No Content (มาตรฐานสากลสำหรับการลบสำเร็จ)
+	return appresponse.NoContent(c)
 }

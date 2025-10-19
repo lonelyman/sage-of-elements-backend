@@ -2,7 +2,6 @@
 package postgres
 
 import (
-	"log"
 	"sage-of-elements-backend/internal/domain"
 	"sage-of-elements-backend/internal/modules/enemy"
 
@@ -20,14 +19,10 @@ func NewEnemyRepository(db *gorm.DB) enemy.EnemyRepository {
 func (r *enemyRepository) FindByID(id uint) (*domain.Enemy, error) {
 	var e domain.Enemy
 	// Preload ทุกอย่างที่เกี่ยวกับศัตรูมาให้หมด! (Abilities, AI)
-	err := r.db.Preload("Element").
+	err := r.db.
+		Preload("Element").
 		Preload("Abilities").
-		Preload("AI").First(&e, id).Error
-	if err != nil {
-		log.Printf("DEBUG: enemyRepo.FindByID finished with an error for ID %d: %v\n", id, err)
-	} else {
-		log.Printf("DEBUG: enemyRepo.FindByID found enemy for ID %d: Name=%s\n", id, e.Name)
-	}
+		Preload("AI.AbilityToUse").First(&e, id).Error
 
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {

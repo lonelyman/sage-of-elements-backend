@@ -25,11 +25,13 @@ type Combatant struct {
 
 	Hand          datatypes.JSON `gorm:"type:jsonb" json:"hand"`
 	ActiveEffects datatypes.JSON `gorm:"type:jsonb" json:"activeEffects"`
+
+	Deck []*CombatantDeck `gorm:"foreignKey:CombatantID;constraint:OnDelete:CASCADE;" json:"-"`
 }
 
-// type ActiveEffect struct {
-// 	EffectID       uint      `json:"effectId"`
-// 	Value          int       `json:"value"`
-// 	TurnsRemaining int       `json:"turnsRemaining"`
-// 	SourceID       uuid.UUID `json:"sourceId"`
-// }
+type ActiveEffect struct {
+	EffectID       uint      `json:"effectId"`
+	Value          int       `json:"value"`
+	TurnsRemaining int       `json:"turnsRemaining"`
+	SourceID       uuid.UUID `json:"sourceId"`
+}

@@ -113,7 +113,11 @@ func (s *combatService) CreateMatch(playerID uint, req CreateMatchRequest) (*dom
 	var combatants []*domain.Combatant
 	combatants = append(combatants, playerCombatant)
 	if req.MatchType == "TRAINING" {
+
+		fmt.Println("req.TrainingEnemies", req.TrainingEnemies)
 		for _, enemyInfo := range req.TrainingEnemies {
+			s.appLogger.Info("Attempting to find enemy in repo", "enemy_id_to_find", enemyInfo.EnemyID)
+
 			enemyData, err := s.enemyRepo.FindByID(enemyInfo.EnemyID)
 			if err != nil || enemyData == nil {
 				return nil, apperrors.NotFoundError(fmt.Sprintf("enemy with id %d not found", enemyInfo.EnemyID))

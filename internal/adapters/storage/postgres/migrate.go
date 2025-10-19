@@ -48,6 +48,7 @@ func AutoMigrate(db *gorm.DB, appLogger applogger.Logger) error {
 		// --- Combat Data ---
 		&domain.CombatMatch{},
 		&domain.Combatant{},
+		&domain.CombatantDeck{},
 	)
 
 	if err != nil {

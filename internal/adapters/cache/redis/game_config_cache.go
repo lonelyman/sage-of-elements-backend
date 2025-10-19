@@ -3,12 +3,14 @@ package redis
 
 import (
 	"context"
+	"fmt"
 	"sage-of-elements-backend/internal/domain"
 
 	"github.com/redis/go-redis/v9"
 )
 
 const gameConfigsCacheKey = "game_configs:v1"
+const elementalMatchupsCacheKey = "elemental_matchups:v1"
 
 // GameConfigCacheRepository คือ "คนทำงาน" ที่คุยกับ Redis สำหรับ Game Configs
 type GameConfigCacheRepository struct {
@@ -34,6 +36,29 @@ func (r *GameConfigCacheRepository) SetAllConfigs(configs []domain.GameConfig) e
 func (r *GameConfigCacheRepository) GetConfig(key string) (string, error) {
 	ctx := context.Background()
 	val, err := r.client.HGet(ctx, gameConfigsCacheKey, key).Result()
+	if err == redis.Nil {
+		return "", nil // Cache miss
+	}
+	return val, err
+}
+
+// SetAllMatchups บันทึกเมทริกซ์แพ้ทางทั้งหมดลงใน Redis Hash
+func (r *GameConfigCacheRepository) SetAllMatchups(matchups []domain.ElementalMatchup) error {
+	ctx := context.Background()
+	pipe := r.client.Pipeline()
+	for _, m := range matchups {
+		key := fmt.Sprintf("%d-%d", m.AttackingElementID, m.DefendingElementID)
+		pipe.HSet(ctx, elementalMatchupsCacheKey, key, m.Modifier)
+	}
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+// GetMatchupModifier ดึงตัวคูณ 1 ค่าจาก Redis Hash
+func (r *GameConfigCacheRepository) GetMatchupModifier(attackerID, defenderID uint) (string, error) {
+	ctx := context.Background()
+	key := fmt.Sprintf("%d-%d", attackerID, defenderID)
+	val, err := r.client.HGet(ctx, elementalMatchupsCacheKey, key).Result()
 	if err == redis.Nil {
 		return "", nil // Cache miss
 	}

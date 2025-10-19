@@ -21,4 +21,5 @@ type DeckRepository interface {
 
 	// นับจำนวน Deck ของตัวละคร
 	CountByCharacterID(characterID uint) (int64, error)
+	Delete(deckID uint) error
 }

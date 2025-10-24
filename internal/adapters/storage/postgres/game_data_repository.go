@@ -111,6 +111,18 @@ func (r *gameDataRepository) FindSpellByID(id uint) (*domain.Spell, error) {
 	return &spell, nil
 }
 
+func (r *gameDataRepository) FindEffectByID(id uint) (*domain.Effect, error) {
+	var effect domain.Effect
+	err := r.db.First(&effect, id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &effect, nil
+}
+
 func (r *gameDataRepository) FindAllElementalMatchups() ([]domain.ElementalMatchup, error) {
 	var matchups []domain.ElementalMatchup
 	err := r.db.Find(&matchups).Error

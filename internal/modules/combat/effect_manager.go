@@ -9,63 +9,6 @@ import (
 	"sort"
 )
 
-/*
-	func (s *combatService) processEndOfTurnEffects(combatant *domain.Combatant) {
-		if combatant.ActiveEffects == nil {
-			return
-		}
-		var currentEffects []domain.ActiveEffect
-		json.Unmarshal(combatant.ActiveEffects, &currentEffects)
-		if len(currentEffects) == 0 {
-			return
-		}
-
-		// --- ⭐️ ณัชชาอัปเกรดตรงนี้! ⭐️ ---
-		// ดึง MaxHP มาครั้งเดียว
-		maxHP := s.getMaxHP(combatant)
-		maxMP := s.getMaxMP(combatant)
-		// --- ⭐️ สิ้นสุด ⭐️ ---
-
-		var remainingEffects []domain.ActiveEffect
-		for _, effect := range currentEffects {
-
-			// --- ⭐️ ณัชชาอัปเกรดตรงนี้! ⭐️ ---
-			// ทำ "Effect" ที่ทำงานตอนจบเทิร์น (เช่น HoT, DoT)
-			switch effect.EffectID {
-			case 100: // BUFF_HP_REGEN
-				healAmount := effect.Value
-				combatant.CurrentHP += healAmount
-				if combatant.CurrentHP > maxHP {
-					combatant.CurrentHP = maxHP
-				}
-				s.appLogger.Info("Applied HP_REGEN tick", "combatant_id", combatant.ID, "heal", healAmount, "new_hp", combatant.CurrentHP)
-			// --- ⭐️ เพิ่ม: Logic MP Regen ⭐️ ---
-			case 101: // BUFF_MP_REGEN
-				regenAmount := effect.Value // ใช้ค่า Value ที่เก็บไว้ในบัฟ
-				combatant.CurrentMP += regenAmount
-				if combatant.CurrentMP > maxMP {
-					combatant.CurrentMP = maxMP
-				}
-				s.appLogger.Info("Applied MP_REGEN tick", "combatant_id", combatant.ID, "regen", regenAmount, "new_mp", combatant.CurrentMP)
-				// -----------------------------
-				// case 306: // DOT_BURN (เผื่อไว้ในอนาคต)
-				//    dotAmount := effect.Value
-				//    combatant.CurrentHP -= dotAmount
-				//    s.appLogger.Info("Applied BURN DoT tick", "combatant_id", combatant.ID, "damage", dotAmount, "new_hp", combatant.CurrentHP)
-			}
-			// --- ⭐️ สิ้นสุด ⭐️ ---
-
-			effect.TurnsRemaining--
-			if effect.TurnsRemaining > 0 {
-				remainingEffects = append(remainingEffects, effect)
-			} else {
-				s.appLogger.Info("Effect has expired", "combatant_id", combatant.ID, "effect_id", effect.EffectID)
-			}
-		}
-		newEffectsJSON, _ := json.Marshal(remainingEffects)
-		combatant.ActiveEffects = newEffectsJSON
-	}
-*/
 func (s *combatService) processEffectTicksAndExpiry(combatant *domain.Combatant) {
 	// 1. ตรวจสอบว่ามี ActiveEffects หรือไม่
 	if combatant.ActiveEffects == nil {
@@ -130,18 +73,19 @@ func (s *combatService) processEffectTicksAndExpiry(combatant *domain.Combatant)
 					somethingChanged = true
 				}
 			}
-			// --- TODO: เพิ่ม case สำหรับ DoT (Damage over Time) เช่น Burn (EffectID 306) ---
-			// case 306: // DEBUFF_DOT_BURN
-			//  dotAmount := currentEffect.Value
-			//  if dotAmount > 0 {
-			//      newHP := combatant.CurrentHP - dotAmount
-			//      if newHP < 0 { newHP = 0 } // กันเลือดติดลบ
-			//      if newHP != combatant.CurrentHP {
-			//          combatant.CurrentHP = newHP
-			//          s.appLogger.Info("Applied BURN DoT tick", "combatant_id", combatant.ID, "damage", dotAmount, "new_hp", combatant.CurrentHP)
-			//          somethingChanged = true
-			//      }
-			//  }
+		case 306: // DEBUFF_IGNITE
+			dotAmount := currentEffect.Value // Damage ต่อเทิร์นจาก Value ของดีบัฟ
+			if dotAmount > 0 {               // ทำงานเฉพาะเมื่อมีค่า Damage
+				newHP := combatant.CurrentHP - dotAmount
+				if newHP < 0 {
+					newHP = 0
+				} // กันเลือดติดลบ
+				if newHP != combatant.CurrentHP { // อัปเดตและ Log เฉพาะเมื่อมีการเปลี่ยนแปลง
+					combatant.CurrentHP = newHP
+					s.appLogger.Info("Applied IGNITE DoT tick", "combatant_id", combatant.ID, "damage", dotAmount, "new_hp", combatant.CurrentHP) // ⭐️ แก้ Log!
+					somethingChanged = true
+				}
+			}
 		}
 		// --- สิ้นสุด Tick Effects ---
 
@@ -252,6 +196,8 @@ func (s *combatService) applyEffect(caster *domain.Combatant, target *domain.Com
 		s.applyBuffEvasion(caster, target, effectData)
 	case 103: // BUFF_DAMAGE_UP
 		s.applyBuffDamageUp(caster, target, effectData)
+	case 104: // BUFF_RETALIATION
+		s.applyBuffRetaliation(caster, target, effectData)
 	case 110: // BUFF_DEFENSE_UP
 		s.applyBuffDefenseUp(caster, target, effectData)
 	case 200: // SYNERGY_GRANT_STANCE_S
@@ -264,34 +210,30 @@ func (s *combatService) applyEffect(caster *domain.Combatant, target *domain.Com
 		s.applySynergyGrantStanceP(caster, target, effectData)
 	case 301: // DEBUFF_SLOW
 		s.applyDebuffSlow(caster, target, effectData)
-
-	// --- ⭐️ เราจะมาเพิ่ม "ผู้เชี่ยวชาญ" คนอื่นๆ ที่นี่ในอนาคต ⭐️ ---
-	// case 2: // SHIELD
-	// 	s.applyShield(caster, target, effectData)
-	// case 3: // HEAL
-	// 	s.applyHeal(caster, target, effectData)
-	// case 100: // BUFF_HP_REGEN
-	// 	s.applyBuffHpRegen(caster, target, effectData)
-	// case 102: // BUFF_EVASION
-	// 	s.applyBuffEvasion(caster, target, effectData)
-	// ... (และอื่นๆ อีก 21+ case) ...
+	case 302: // DEBUFF_VULNERABLE
+		s.applyDebuffVulnerable(caster, target, effectData)
+	case 306: // DEBUFF_IGNITE
+		s.applyDebuffIgnite(caster, target, effectData)
 
 	default:
 		s.appLogger.Warn("Attempted to apply an unknown or unimplemented effect", "effect_id", effectID)
 	}
 }
 
-// --- "ทีมผู้เชี่ยวชาญ" (The Specialists) ---
+// --- ⭐️ ผู้เชี่ยวชาญด้านการทำ Damage (เวอร์ชันอัปเกรดเต็มรูปแบบ) ⭐️ ---
 func (s *combatService) applyDamage(caster *domain.Combatant, target *domain.Combatant, effectData map[string]interface{}, spell *domain.Spell) {
-	// --- ⭐️ Logic เช็ค Evasion! ⭐️ ---
-	var targetActiveEffects []domain.ActiveEffect
-	evasionChance := 0 // % หลบหลีกเริ่มต้น
+
+	// --- ⭐️ ขั้นตอนที่ 1: Logic เช็ค Evasion (หลบหลีก) ⭐️ ---
+	// ต้องเช็คก่อน! ถ้าหลบได้ คือจบเลย ไม่ต้องคำนวณอะไรต่อ
+	var targetActiveEffectsForEvasion []domain.ActiveEffect // ⭐️ ใช้ตัวแปรเฉพาะส่วน
+	evasionChance := 0                                      // % หลบหลีกเริ่มต้น
 	hasEvasionBuff := false
 
 	if target.ActiveEffects != nil {
-		err := json.Unmarshal(target.ActiveEffects, &targetActiveEffects)
+		// ⭐️ ใช้ตัวแปรใหม่ (targetActiveEffectsForEvasion)
+		err := json.Unmarshal(target.ActiveEffects, &targetActiveEffectsForEvasion)
 		if err == nil {
-			for _, effect := range targetActiveEffects {
+			for _, effect := range targetActiveEffectsForEvasion {
 				if effect.EffectID == 102 { // เจอ Buff Evasion!
 					evasionChance = effect.Value // ดึง % หลบหลีกมาจาก Value ของบัฟ
 					hasEvasionBuff = true
@@ -308,20 +250,20 @@ func (s *combatService) applyDamage(caster *domain.Combatant, target *domain.Com
 		s.appLogger.Info("Performing Evasion check", "target_id", target.ID, "chance", evasionChance, "roll", roll)
 		if roll < evasionChance { // ถ้าเลขสุ่ม < โอกาสหลบ
 			s.appLogger.Info("Attack EVADED!", "caster", caster.ID, "target", target.ID, "spell_id", spell.ID)
-			// อาจจะส่ง Event บอก Client ว่า "MISS!"
-			return // จบการทำงาน ไม่ต้องคำนวณ Damage หรือ Shield ต่อ!
+			// TODO: อาจจะส่ง Event บอก Client ว่า "MISS!"
+			return // ⭐️ จบการทำงาน! ไม่ต้องคำนวณ Damage หรือ Shield ต่อ!
 		} else {
 			s.appLogger.Info("Evasion check failed, attack proceeds", "target_id", target.ID)
 		}
 	}
 	// --- ⭐️ สิ้นสุด Logic Evasion ⭐️ ---
 
-	// --- การตรวจสอบ Type Assertion ---
+	// --- ⭐️ ขั้นตอนที่ 2: ตรวจสอบข้อมูล (Validation) และเตรียมการ ⭐️ ---
 	effectIDFloat, ok1 := effectData["effect_id"].(float64)
 	baseValueFloat, ok2 := effectData["value"].(float64)
 	powerModifierFloat, ok3 := effectData["power_modifier"].(float64)
 	if !ok1 || !ok2 {
-		s.appLogger.Warn("Invalid or missing effect_id or value in effectData for applyDamage", effectData)
+		s.appLogger.Warn("Invalid or missing effect_id or value in effectData for applyDamage", "data", effectData)
 		return // ไม่ทำ Damage ถ้าข้อมูลพื้นฐานผิดพลาด
 	}
 	if !ok3 {
@@ -335,78 +277,107 @@ func (s *combatService) applyDamage(caster *domain.Combatant, target *domain.Com
 	}
 	powerModifier := powerModifierFloat // ใช้ค่าที่ตรวจสอบแล้ว
 
-	// คำนวณ Damage ทั้งหมดที่ควรจะทำได้
+	// --- ⭐️ ขั้นตอนที่ 3: คำนวณ Damage พื้นฐาน (Base Calculation) ⭐️ ---
+	// (เรียก calculateEffectValue ที่อาจจะรวม Talent, บัฟ Caster, ธาตุ ฯลฯ)
 	calculatedDamage, err := s.calculateEffectValue(caster, target, spell, tempSpellEffect, powerModifier)
 	if err != nil {
 		s.appLogger.Error("Error calculating damage value", err)
 		return
 	}
 
+	// --- ⭐️ ขั้นตอนที่ 4: Logic เช็ค Vulnerable (ID 302) บนเป้าหมาย ⭐️ ---
+	// (เพิ่ม Damage ที่จะได้รับ)
+	var targetActiveEffectsForVulnerable []domain.ActiveEffect
+	damageIncreasePercent := 0 // % Damage ที่จะเพิ่มขึ้น (Default = 0)
+	hasVulnerableDebuff := false
+
+	if target.ActiveEffects != nil {
+		// ⭐️ ใช้ตัวแปรใหม่ (targetActiveEffectsForVulnerable)
+		err := json.Unmarshal(target.ActiveEffects, &targetActiveEffectsForVulnerable)
+		if err == nil {
+			for _, effect := range targetActiveEffectsForVulnerable {
+				if effect.EffectID == 302 { // เจอดีบัฟ Vulnerable!
+					damageIncreasePercent = effect.Value // ดึง % มาจาก Value
+					hasVulnerableDebuff = true
+					s.appLogger.Info("Target has Vulnerable debuff", "target_id", target.ID, "increase_percent", damageIncreasePercent)
+					break // เจออันเดียวพอ (สมมติว่าไม่ Stack)
+				}
+			}
+		} else {
+			s.appLogger.Error("Failed to unmarshal active effects for Vulnerable check", err, "target_id", target.ID)
+		}
+	}
+
+	if hasVulnerableDebuff && damageIncreasePercent > 0 {
+		// เพิ่ม Damage (คำนวณแบบ % ของ float64)
+		multiplier := 1.0 + (float64(damageIncreasePercent) / 100.0) // เช่น 10% -> 1.1
+		originalCalculatedDamage := calculatedDamage                 // เก็บไว้ดูใน Log
+		calculatedDamage = calculatedDamage * multiplier
+		s.appLogger.Info("Applied Vulnerable damage increase", "target_id", target.ID, "original_damage", originalCalculatedDamage, "multiplier", multiplier, "final_damage", calculatedDamage)
+	}
+	// --- ⭐️ สิ้นสุด Logic Vulnerable ⭐️ ---
+
+	// --- ⭐️ ขั้นตอนที่ 5: แปลง Damage เป็น int (หลังคำนวณ % แล้ว) ⭐️ ---
 	damageDealt := int(math.Round(calculatedDamage)) // ปัดเศษ Damage
 	if damageDealt < 0 {
 		damageDealt = 0
 	} // Damage ไม่ควรติดลบ
 
-	// --- ⭐️ Logic จัดการ Shield! ⭐️ ---
+	// --- ⭐️ ขั้นตอนที่ 6: Logic จัดการ Shield (ID 2) บนเป้าหมาย ⭐️ ---
+	// (ลด Damage ด้วย Shield ก่อน)
 	remainingDamage := damageDealt           // Damage ที่เหลือหลังจากหัก Shield
 	var activeEffects []domain.ActiveEffect  // List บัฟ/ดีบัฟ ปัจจุบันของเป้าหมาย
 	var updatedEffects []domain.ActiveEffect // List บัฟ/ดีบัฟ ที่จะเหลืออยู่หลังจบ Logic นี้
 	hasShieldEffect := false                 // Flag ว่าเป้าหมายมี Shield หรือไม่
 	shieldAbsorbedTotal := 0                 // เก็บว่า Shield ดูดซับไปเท่าไหร่
 
-	// ตรวจสอบว่าเป้าหมายมี ActiveEffects หรือไม่
 	if target.ActiveEffects != nil {
-		// ลอง Unmarshal JSON ของ ActiveEffects
 		err := json.Unmarshal(target.ActiveEffects, &activeEffects)
 		if err == nil { // ถ้า Unmarshal สำเร็จ
-			// สร้าง Slice ชั่วคราวเพื่อทำงาน (ป้องกันปัญหาตอนแก้ไขขณะวนลูป)
 			tempEffects := make([]domain.ActiveEffect, len(activeEffects))
 			copy(tempEffects, activeEffects)
 
-			// เรียงลำดับ Shield ตาม TurnsRemaining น้อยไปมาก (ถ้ามี Shield หลายอัน จะได้ลดอันใกล้หมดอายุก่อน)
+			// เรียงลำดับ Shield ตาม TurnsRemaining น้อยไปมาก (จะได้ลดอันใกล้หมดอายุก่อน)
 			sort.SliceStable(tempEffects, func(i, j int) bool {
 				isIShield := tempEffects[i].EffectID == 2
 				isJShield := tempEffects[j].EffectID == 2
 				if isIShield && isJShield {
 					return tempEffects[i].TurnsRemaining < tempEffects[j].TurnsRemaining
 				}
-				// จัดเรียงให้ Shield มาก่อน Effect อื่นๆ (ถ้าต้องการ) แต่ตอนนี้ให้เรียงตาม Turn ก่อน
 				if isIShield {
 					return true
 				}
 				if isJShield {
 					return false
 				}
-				return i < j // รักษาลำดับเดิมของ Effect อื่นๆ
+				return i < j
 			})
 
 			// วนลูปเช็ค Effect แต่ละอันใน Slice ชั่วคราว
 			for i := range tempEffects {
-				// เช็คว่าเป็น Shield (ID 2), มี HP เหลือ (Value > 0), และ Damage ยังเหลือให้ดูดซับ
 				if tempEffects[i].EffectID == 2 && tempEffects[i].Value > 0 && remainingDamage > 0 {
-					hasShieldEffect = true           // ตั้ง Flag ว่าเจอ Shield
-					shieldHP := tempEffects[i].Value // HP ปัจจุบันของ Shield นี้
-					absorbedDamage := 0              // Damage ที่ Shield นี้จะดูดซับ
+					hasShieldEffect = true
+					shieldHP := tempEffects[i].Value
+					absorbedDamage := 0
 
-					if remainingDamage >= shieldHP { // ถ้า Damage แรงกว่าหรือเท่ากับ Shield
-						absorbedDamage = shieldHP   // Shield ดูดซับได้เต็มที่
-						remainingDamage -= shieldHP // ลด Damage ที่เหลือลง
-						tempEffects[i].Value = 0    // Shield แตก! (HP=0)
+					if remainingDamage >= shieldHP {
+						absorbedDamage = shieldHP
+						remainingDamage -= shieldHP
+						tempEffects[i].Value = 0 // Shield แตก!
 						s.appLogger.Info("Shield broke!", "target_id", target.ID, "shield_index", i, "absorbed", absorbedDamage)
-						// Shield ที่แตกจะถูกกรองออกไปตอนสร้าง updatedEffects
-					} else { // ถ้า Damage เบากว่า Shield
-						absorbedDamage = remainingDamage        // Shield ดูดซับ Damage ทั้งหมดที่เหลือ
-						tempEffects[i].Value -= remainingDamage // ลด HP ของ Shield ลง
-						remainingDamage = 0                     // Damage โดนดูดหมดแล้ว
+					} else {
+						absorbedDamage = remainingDamage
+						tempEffects[i].Value -= remainingDamage
+						remainingDamage = 0 // Damage โดนดูดหมดแล้ว
 						s.appLogger.Info("Shield absorbed damage", "target_id", target.ID, "shield_index", i, "absorbed", absorbedDamage, "shield_hp_left", tempEffects[i].Value)
 					}
-					shieldAbsorbedTotal += absorbedDamage // เพิ่มค่ารวมที่ Shield ดูดซับไป
+					shieldAbsorbedTotal += absorbedDamage
 				}
-			} // จบ Loop การดูดซับ Damage ของ Shield
+			} // จบ Loop Shield
 
-			// สร้าง list ใหม่ โดยกรองเอา Shield ที่แตก (Value <= 0) ออกไป
+			// กรองเอา Shield ที่แตก (Value <= 0) ออกไป
 			for _, effect := range tempEffects {
-				if !(effect.EffectID == 2 && effect.Value <= 0) { // เก็บไว้ถ้า *ไม่ใช่* Shield ที่แตก
+				if !(effect.EffectID == 2 && effect.Value <= 0) {
 					updatedEffects = append(updatedEffects, effect)
 				} else {
 					s.appLogger.Info("Removing broken shield from active effects", "target_id", target.ID, "effect_id", effect.EffectID)
@@ -419,21 +390,18 @@ func (s *combatService) applyDamage(caster *domain.Combatant, target *domain.Com
 				target.ActiveEffects = newEffectsJSON // อัปเดต ActiveEffects ของเป้าหมาย
 			} else {
 				s.appLogger.Error("Failed to marshal updated active effects after shield processing", marshalErr, "target_id", target.ID)
-				// ถ้า Marshal ไม่ได้ อาจจะปล่อย ActiveEffects เดิมไว้ หรือจะเคลียร์ทิ้ง? ตอนนี้ปล่อยไว้ก่อน
 			}
 
 		} else { // ถ้า Unmarshal ไม่สำเร็จ
 			s.appLogger.Error("Failed to unmarshal active effects for shield check", err, "target_id", target.ID)
-			// ถ้าอ่าน Effect ไม่ได้ ก็ถือว่าไม่มี Shield, Damage ทั้งหมดลง HP
-			remainingDamage = damageDealt
+			remainingDamage = damageDealt // ถือว่าไม่มี Shield
 		}
 	} else { // ถ้าไม่มี ActiveEffects เลย
-		// ก็ไม่มี Shield, Damage ทั้งหมดลง HP
-		remainingDamage = damageDealt
+		remainingDamage = damageDealt // ก็ไม่มี Shield
 	}
 	// --- ⭐️ สิ้นสุด Logic Shield ⭐️ ---
 
-	// --- ลด HP (ถ้า Damage ยังเหลือ) ---
+	// --- ⭐️ ขั้นตอนที่ 7: ลด HP เป้าหมาย (ส่วนที่ทะลุ Shield) ⭐️ ---
 	hpBefore := target.CurrentHP // เก็บ HP ก่อนโดน Damage (ส่วนที่ทะลุ Shield)
 	var hpDamageDealt int = 0    // เก็บว่า HP โดนลดไปเท่าไหร่จริงๆ
 	if remainingDamage > 0 {     // ถ้ามี Damage เหลือหลังจากหัก Shield
@@ -445,11 +413,48 @@ func (s *combatService) applyDamage(caster *domain.Combatant, target *domain.Com
 	}
 	hpAfter := target.CurrentHP // HP สุดท้าย
 
-	// Log ผลลัพธ์สุดท้าย
+	// --- ⭐️ ขั้นตอนที่ 8: (ใหม่!) Logic เช็ค Retaliation (ID 104) บนเป้าหมาย ⭐️ ---
+	// (สะท้อน Damage กลับไปหา Caster)
+	var targetActiveEffectsForRetaliation []domain.ActiveEffect
+	retaliationDamage := 0 // Damage ที่จะสะท้อน (Default = 0)
+	hasRetaliationBuff := false
+
+	// เงื่อนไข: 1. การโจมตีต้อง "โดน" (โดน HP หรือ โดน Shield)
+	//          2. ต้องไม่ใช่การโจมตีใส่ตัวเอง
+	//          3. เป้าหมายต้องมี ActiveEffects
+	if (hpDamageDealt > 0 || shieldAbsorbedTotal > 0) && (caster.ID != target.ID) && target.ActiveEffects != nil {
+		// ⭐️ ใช้ตัวแปรใหม่ (targetActiveEffectsForRetaliation)
+		err := json.Unmarshal(target.ActiveEffects, &targetActiveEffectsForRetaliation)
+		if err == nil {
+			for _, effect := range targetActiveEffectsForRetaliation {
+				if effect.EffectID == 104 && effect.Value > 0 { // เจอบัฟ Retaliation และมีค่า Damage
+					retaliationDamage = effect.Value // ดึง Damage สะท้อนมาจาก Value
+					hasRetaliationBuff = true
+					s.appLogger.Info("Target has Retaliation buff", "target_id", target.ID, "retaliation_damage", retaliationDamage)
+					break // เจออันเดียวพอ (สมมติว่าไม่ Stack)
+				}
+			}
+		} else {
+			s.appLogger.Error("Failed to unmarshal active effects for Retaliation check", err, "target_id", target.ID)
+		}
+	}
+
+	if hasRetaliationBuff && retaliationDamage > 0 {
+		// สะท้อน Damage กลับไปหา Caster!
+		casterHpBefore := caster.CurrentHP
+		caster.CurrentHP -= retaliationDamage
+		if caster.CurrentHP < 0 {
+			caster.CurrentHP = 0
+		} // กัน Caster เลือดติดลบ
+		s.appLogger.Info("Applied Retaliation damage to caster", "caster_id", caster.ID, "damage_taken", retaliationDamage, "caster_hp_before", casterHpBefore, "caster_hp_after", caster.CurrentHP)
+	}
+	// --- ⭐️ สิ้นสุด Logic Retaliation ⭐️ ---
+
+	// --- ⭐️ ขั้นตอนที่ 9: Log ผลลัพธ์สุดท้าย ⭐️ ---
 	s.appLogger.Info("Applied DAMAGE effect",
 		"caster", caster.ID,
 		"target", target.ID,
-		"initial_damage", damageDealt, // Damage ที่คำนวณได้ตอนแรก
+		"initial_damage", damageDealt, // Damage ที่คำนวณได้ตอนแรก (รวม Vulnerable แล้ว)
 		"absorbed_by_shield", shieldAbsorbedTotal, // Damage ที่ Shield ดูดซับไปทั้งหมด
 		"hp_damage", hpDamageDealt, // Damage ที่ลง HP จริงๆ
 		"target_hp_before", hpBefore, // HP ก่อนโดนส่วนที่ทะลุ Shield
@@ -554,27 +559,59 @@ func (s *combatService) applyBuffDefenseUp(caster *domain.Combatant, target *dom
 }
 
 func (s *combatService) applySynergyGrantStanceS(caster *domain.Combatant, target *domain.Combatant, effectData map[string]interface{}) {
-	// (ท่า EarthSlam ไม่ได้ส่ง "value" มา, เราจะใช้ค่า 0)
+	// --- ⭐️ 1. Get Value (เหมือนเดิม) ⭐️ ---
 	value := 0
 	if v, ok := effectData["value"]; ok {
 		value = int(v.(float64))
 	}
-	duration := int(effectData["duration"].(float64))
 
-	var activeEffects []domain.ActiveEffect
-	// "target" ที่ส่งเข้ามาในฟังก์ชันนี้... คือ "caster" (ผู้เล่น) อยู่แล้ว!
-	if target.ActiveEffects != nil {
-		json.Unmarshal(target.ActiveEffects, &activeEffects)
+	// --- ⭐️ 2. Get Duration (เพิ่ม Error Check) ⭐️ ---
+	durationFloat, ok := effectData["duration"].(float64)
+	if !ok {
+		s.appLogger.Warn("Invalid or missing duration in effectData for applySynergyGrantStanceS", "data", effectData)
+		return // Exit if duration is missing
 	}
+	duration := int(durationFloat)
+
+	// --- ⭐️ 3. Unmarshal Existing Effects (เพิ่ม Error Check) ⭐️ ---
+	var activeEffects []domain.ActiveEffect
+	if target.ActiveEffects != nil {
+		err := json.Unmarshal(target.ActiveEffects, &activeEffects)
+		if err != nil {
+			s.appLogger.Error("Failed to unmarshal existing active effects for Stance S buff", err, "target_id", target.ID)
+			activeEffects = []domain.ActiveEffect{} // Start with an empty list if JSON is bad
+		}
+	}
+
+	// --- ⭐️ 4. Add "Replace" Logic ⭐️ ---
+	var tempEffects []domain.ActiveEffect
+	for _, effect := range activeEffects {
+		if effect.EffectID != 200 { // Keep effects that are NOT Stance S (ID 200)
+			tempEffects = append(tempEffects, effect)
+		} else {
+			s.appLogger.Info("Replacing existing Stance S buff", "target_id", target.ID)
+		}
+	}
+	activeEffects = tempEffects // Use the filtered list (without old Stance S)
+
+	// --- ⭐️ 5. Create and Append New Effect (เหมือนเดิม) ⭐️ ---
 	newEffect := domain.ActiveEffect{
 		EffectID:       200, // SYNERGY_GRANT_STANCE_S
 		Value:          value,
 		TurnsRemaining: duration,
 		SourceID:       caster.ID,
 	}
-	activeEffects = append(activeEffects, newEffect)
-	newEffectsJSON, _ := json.Marshal(activeEffects)
+	activeEffects = append(activeEffects, newEffect) // Add the new Stance S
+
+	// --- ⭐️ 6. Marshal and Save (เพิ่ม Error Check) ⭐️ ---
+	newEffectsJSON, err := json.Marshal(activeEffects)
+	if err != nil {
+		s.appLogger.Error("Failed to marshal updated active effects for Stance S buff", err, "target_id", target.ID)
+		return // Don't save if marshaling fails
+	}
 	target.ActiveEffects = newEffectsJSON
+
+	// --- ⭐️ 7. Log (เหมือนเดิม) ⭐️ ---
 	s.appLogger.Info("Applied SYNERGY_GRANT_STANCE_S effect", "target", target.ID, "duration", duration)
 }
 
@@ -766,14 +803,21 @@ func (s *combatService) applyBuffHpRegen(caster *domain.Combatant, target *domai
 }
 
 func (s *combatService) applySynergyGrantStanceL(caster *domain.Combatant, target *domain.Combatant, effectData map[string]interface{}) {
+	// --- 1. Get Value (เหมือนเดิม) ---
 	value := 0
+	if v, ok := effectData["value"]; ok {
+		value = int(v.(float64))
+	}
+
+	// --- 2. Get Duration (เหมือนเดิม, already has error check) ---
 	durationFloat, ok := effectData["duration"].(float64)
 	if !ok {
-		s.appLogger.Warn("Invalid or missing duration in effectData for applySynergyGrantStanceL", effectData)
+		s.appLogger.Warn("Invalid or missing duration in effectData for applySynergyGrantStanceL", "data", effectData) // Corrected log data
 		return
 	}
 	duration := int(durationFloat)
 
+	// --- 3. Unmarshal Existing Effects (เหมือนเดิม, already has error check) ---
 	var activeEffects []domain.ActiveEffect
 	if target.ActiveEffects != nil {
 		err := json.Unmarshal(target.ActiveEffects, &activeEffects)
@@ -783,29 +827,55 @@ func (s *combatService) applySynergyGrantStanceL(caster *domain.Combatant, targe
 		}
 	}
 
+	// --- ⭐️ 4. Add "Replace" Logic ⭐️ ---
+	var tempEffects []domain.ActiveEffect
+	for _, effect := range activeEffects {
+		if effect.EffectID != 201 { // 👈 Change ID check to 201
+			tempEffects = append(tempEffects, effect)
+		} else {
+			s.appLogger.Info("Replacing existing Stance L buff", "target_id", target.ID) // 👈 Update log message
+		}
+	}
+	activeEffects = tempEffects // Use the filtered list
+
+	// --- 5. Create and Append New Effect (เหมือนเดิม) ---
 	newEffect := domain.ActiveEffect{
-		EffectID:       201, // ⭐️ แก้ ID! ⭐️
+		EffectID:       201, // Correct ID for Stance L
 		Value:          value,
 		TurnsRemaining: duration,
 		SourceID:       caster.ID,
 	}
 	activeEffects = append(activeEffects, newEffect)
-	newEffectsJSON, _ := json.Marshal(activeEffects)
+
+	// --- ⭐️ 6. Marshal and Save (เพิ่ม Error Check) ⭐️ ---
+	newEffectsJSON, err := json.Marshal(activeEffects) // 👈 Add error check variable 'err'
+	if err != nil {
+		s.appLogger.Error("Failed to marshal updated active effects for Stance L buff", err, "target_id", target.ID) // 👈 Add error handling
+		return
+	}
 	target.ActiveEffects = newEffectsJSON
 
-	s.appLogger.Info("Applied SYNERGY_GRANT_STANCE_L effect", "target", target.ID, "duration", duration) // ⭐️ แก้ Log! ⭐️
+	// --- 7. Log (เหมือนเดิม) ---
+	s.appLogger.Info("Applied SYNERGY_GRANT_STANCE_L effect", "target", target.ID, "duration", duration)
 }
 
-// --- ⭐️ เพิ่ม ผู้เชี่ยวชาญ Stance G! (Copy มาแก้) ⭐️ ---
+// --- ⭐️ เพิ่ม ผู้เชี่ยวชาญ Stance G! (เวอร์ชันแก้ไข Bug ซ้อนทับ) ⭐️ ---
 func (s *combatService) applySynergyGrantStanceG(caster *domain.Combatant, target *domain.Combatant, effectData map[string]interface{}) {
+	// --- 1. Get Value (เหมือนเดิม) ---
 	value := 0
+	if v, ok := effectData["value"]; ok {
+		value = int(v.(float64))
+	}
+
+	// --- 2. Get Duration (เหมือนเดิม, already has error check) ---
 	durationFloat, ok := effectData["duration"].(float64)
 	if !ok {
-		s.appLogger.Warn("Invalid or missing duration in effectData for applySynergyGrantStanceG", effectData)
+		s.appLogger.Warn("Invalid or missing duration in effectData for applySynergyGrantStanceG", "data", effectData) // Corrected log data
 		return
 	}
 	duration := int(durationFloat)
 
+	// --- 3. Unmarshal Existing Effects (เหมือนเดิม, already has error check) ---
 	var activeEffects []domain.ActiveEffect
 	if target.ActiveEffects != nil {
 		err := json.Unmarshal(target.ActiveEffects, &activeEffects)
@@ -815,29 +885,55 @@ func (s *combatService) applySynergyGrantStanceG(caster *domain.Combatant, targe
 		}
 	}
 
+	// --- ⭐️ 4. Add "Replace" Logic ⭐️ ---
+	var tempEffects []domain.ActiveEffect
+	for _, effect := range activeEffects {
+		if effect.EffectID != 202 { // 👈 Change ID check to 202
+			tempEffects = append(tempEffects, effect)
+		} else {
+			s.appLogger.Info("Replacing existing Stance G buff", "target_id", target.ID) // 👈 Update log message
+		}
+	}
+	activeEffects = tempEffects // Use the filtered list
+
+	// --- 5. Create and Append New Effect (เหมือนเดิม) ---
 	newEffect := domain.ActiveEffect{
-		EffectID:       202, // ⭐️ แก้ ID! ⭐️
+		EffectID:       202, // Correct ID for Stance G
 		Value:          value,
 		TurnsRemaining: duration,
 		SourceID:       caster.ID,
 	}
 	activeEffects = append(activeEffects, newEffect)
-	newEffectsJSON, _ := json.Marshal(activeEffects)
+
+	// --- ⭐️ 6. Marshal and Save (เพิ่ม Error Check) ⭐️ ---
+	newEffectsJSON, err := json.Marshal(activeEffects) // 👈 Add error check variable 'err'
+	if err != nil {
+		s.appLogger.Error("Failed to marshal updated active effects for Stance G buff", err, "target_id", target.ID) // 👈 Add error handling
+		return
+	}
 	target.ActiveEffects = newEffectsJSON
 
-	s.appLogger.Info("Applied SYNERGY_GRANT_STANCE_G effect", "target", target.ID, "duration", duration) // ⭐️ แก้ Log! ⭐️
+	// --- 7. Log (เหมือนเดิม) ---
+	s.appLogger.Info("Applied SYNERGY_GRANT_STANCE_G effect", "target", target.ID, "duration", duration)
 }
 
-// --- ⭐️ เพิ่ม ผู้เชี่ยวชาญ Stance P! (Copy มาแก้) ⭐️ ---
+// --- ⭐️ เพิ่ม ผู้เชี่ยวชาญ Stance P! (เวอร์ชันแก้ไข Bug ซ้อนทับ) ⭐️ ---
 func (s *combatService) applySynergyGrantStanceP(caster *domain.Combatant, target *domain.Combatant, effectData map[string]interface{}) {
+	// --- 1. Get Value (เหมือนเดิม) ---
 	value := 0
+	if v, ok := effectData["value"]; ok {
+		value = int(v.(float64))
+	}
+
+	// --- 2. Get Duration (เหมือนเดิม, already has error check) ---
 	durationFloat, ok := effectData["duration"].(float64)
 	if !ok {
-		s.appLogger.Warn("Invalid or missing duration in effectData for applySynergyGrantStanceP", effectData)
+		s.appLogger.Warn("Invalid or missing duration in effectData for applySynergyGrantStanceP", "data", effectData) // Corrected log data
 		return
 	}
 	duration := int(durationFloat)
 
+	// --- 3. Unmarshal Existing Effects (เหมือนเดิม, already has error check) ---
 	var activeEffects []domain.ActiveEffect
 	if target.ActiveEffects != nil {
 		err := json.Unmarshal(target.ActiveEffects, &activeEffects)
@@ -847,26 +943,43 @@ func (s *combatService) applySynergyGrantStanceP(caster *domain.Combatant, targe
 		}
 	}
 
+	// --- ⭐️ 4. Add "Replace" Logic ⭐️ ---
+	var tempEffects []domain.ActiveEffect
+	for _, effect := range activeEffects {
+		if effect.EffectID != 203 { // 👈 Change ID check to 203
+			tempEffects = append(tempEffects, effect)
+		} else {
+			s.appLogger.Info("Replacing existing Stance P buff", "target_id", target.ID) // 👈 Update log message
+		}
+	}
+	activeEffects = tempEffects // Use the filtered list
+
+	// --- 5. Create and Append New Effect (เหมือนเดิม) ---
 	newEffect := domain.ActiveEffect{
-		EffectID:       203, // ⭐️ แก้ ID! ⭐️
+		EffectID:       203, // Correct ID for Stance P
 		Value:          value,
 		TurnsRemaining: duration,
 		SourceID:       caster.ID,
 	}
 	activeEffects = append(activeEffects, newEffect)
-	newEffectsJSON, _ := json.Marshal(activeEffects)
+
+	// --- ⭐️ 6. Marshal and Save (เพิ่ม Error Check) ⭐️ ---
+	newEffectsJSON, err := json.Marshal(activeEffects) // 👈 Add error check variable 'err'
+	if err != nil {
+		s.appLogger.Error("Failed to marshal updated active effects for Stance P buff", err, "target_id", target.ID) // 👈 Add error handling
+		return
+	}
 	target.ActiveEffects = newEffectsJSON
 
-	s.appLogger.Info("Applied SYNERGY_GRANT_STANCE_P effect", "target", target.ID, "duration", duration) // ⭐️ แก้ Log! ⭐️
+	// --- 7. Log (เหมือนเดิม) ---
+	s.appLogger.Info("Applied SYNERGY_GRANT_STANCE_P effect", "target", target.ID, "duration", duration)
 }
 
 func (s *combatService) applyShield(caster *domain.Combatant, target *domain.Combatant, effectData map[string]interface{}, spell *domain.Spell) {
 	// --- การตรวจสอบ Type Assertion ---
 	effectIDFloat, ok1 := effectData["effect_id"].(float64)
-	baseValueFloat, ok2 := effectData["value"].(float64) // นี่คือค่า HP ของ Shield
-	// Shield ปกติไม่มี Duration แต่ Stone Skin ให้ Stance ด้วย ซึ่ง Stance มี Duration
-	// เราจะใช้ Duration จาก Stance (EffectID 200) ถ้ามี
-	// durationFloat, ok3 := effectData["duration"].(float64) // ดึง Duration มาด้วย (เผื่อไว้)
+	baseValueFloat, ok2 := effectData["value"].(float64)
+	durationFloat, ok3 := effectData["duration"].(float64) // ⭐️ 1. อ่าน Duration
 	powerModifierFloat, ok4 := effectData["power_modifier"].(float64)
 
 	if !ok1 || !ok2 {
@@ -876,10 +989,6 @@ func (s *combatService) applyShield(caster *domain.Combatant, target *domain.Com
 	if !ok4 {
 		powerModifierFloat = 1.0
 	}
-	// Duration ไม่จำเป็นต้องมีเสมอไปสำหรับ Shield เพียวๆ
-	// if !ok3 {
-	// 	durationFloat = 2.0
-	// } // ใส่ Default ไว้ซัก 2 เทิร์น เผื่อเวท Shield เดี่ยวๆ ในอนาคต
 	// -----------------------------
 
 	tempSpellEffect := &domain.SpellEffect{
@@ -887,37 +996,44 @@ func (s *combatService) applyShield(caster *domain.Combatant, target *domain.Com
 		BaseValue: baseValueFloat,
 	}
 	powerModifier := powerModifierFloat
-	shieldDuration := 1 // Default ให้ Shield อยู่ 1 เทิร์น ถ้าไม่มี Stance มาด้วย
-	foundStanceDuration := false
-	for _, effect := range spell.Effects { // วนดู Effect ทั้งหมดของเวทนี้
-		// หา Effect ที่เป็น Stance (ID 200-203)
-		if effect.EffectID >= 200 && effect.EffectID <= 203 && effect.DurationInTurns > 0 {
-			shieldDuration = effect.DurationInTurns // เอา Duration ของ Stance มาใช้!
-			foundStanceDuration = true
-			s.appLogger.Info("Using Stance duration for Shield", "stance_effect_id", effect.EffectID, "duration", shieldDuration)
-			break // เจอแล้ว ออกเลย
+
+	// --- ⭐️ 2. Logic การหา Duration ที่เราแก้ไขแล้ว (สมบูรณ์) ⭐️ ---
+	var shieldDuration int = 0
+	if ok3 && durationFloat > 0 {
+		shieldDuration = int(durationFloat)
+		s.appLogger.Info("Using Shield's own duration from effectData", "duration", shieldDuration)
+	}
+	if shieldDuration == 0 {
+		foundStanceDuration := false
+		for _, effect := range spell.Effects {
+			if effect.EffectID >= 200 && effect.EffectID <= 203 && effect.DurationInTurns > 0 {
+				shieldDuration = effect.DurationInTurns
+				foundStanceDuration = true
+				s.appLogger.Info("Using Stance duration for Shield", "stance_effect_id", effect.EffectID, "duration", shieldDuration)
+				break
+			}
+		}
+		if !foundStanceDuration {
+			s.appLogger.Warn("No Stance effect found for Shield spell, attempting default", "spell_id", spell.ID)
 		}
 	}
-	if !foundStanceDuration {
-		// ถ้าไม่เจอ Stance Effect เลย ให้ Log เตือน และใช้ Default 1 เทิร์น
-		s.appLogger.Warn("No Stance effect found for Shield spell, defaulting duration", "spell_id", spell.ID, "default_duration", shieldDuration)
+	if shieldDuration == 0 {
+		shieldDuration = 1
+		s.appLogger.Warn("No duration found in effectData or Stance, defaulting duration", "spell_id", spell.ID, "default_duration", shieldDuration)
 	}
+	// --- ⭐️ สิ้นสุด Logic Duration ⭐️ ---
 
-	// --- ⭐️ Shield HP ควร scale กับ Talent ไหม? (เช่น Talent S?) ⭐️ ---
-	// Option 1: ไม่ scale ใช้ BaseValue ตรงๆ (ง่ายสุด)
-	// shieldHP := tempSpellEffect.BaseValue * powerModifier
-	// Option 2: Scale กับ Talent (เช่น S)
+	// --- ⭐️ Logic คำนวณ Shield HP (เหมือนเดิม) ⭐️ ---
 	calculatedShieldHP, err := s.calculateEffectValue(caster, target, spell, tempSpellEffect, powerModifier)
 	if err != nil {
 		s.appLogger.Error("Error calculating Shield HP value", err)
 		calculatedShieldHP = tempSpellEffect.BaseValue * powerModifier // Fallback
 	}
-	// -----------------------------------------------------------------
-
 	shieldHP := int(math.Round(calculatedShieldHP))
 	if shieldHP < 0 {
 		shieldHP = 0
 	}
+	// --- ⭐️ สิ้นสุด Logic Shield HP ⭐️ ---
 
 	var activeEffects []domain.ActiveEffect
 	if target.ActiveEffects != nil {
@@ -928,18 +1044,30 @@ func (s *combatService) applyShield(caster *domain.Combatant, target *domain.Com
 		}
 	}
 
+	// --- ⭐️ ณัชชาเพิ่มตรงนี้ 3: Logic "อันใหม่ทับอันเก่า" (Replace) ⭐️ ---
+	var tempEffects []domain.ActiveEffect
+	for _, effect := range activeEffects {
+		if effect.EffectID != 2 { // เก็บ Effect อื่นๆ ที่ไม่ใช่ Shield (ID 2)
+			tempEffects = append(tempEffects, effect)
+		} else {
+			s.appLogger.Info("Replacing existing Shield buff", "target_id", target.ID, "old_shield_value", effect.Value)
+		}
+	}
+	activeEffects = tempEffects // ใช้ list ที่กรอง Shield อันเก่าออกแล้ว
+	// --- ⭐️ สิ้นสุด Logic Replace ⭐️ ---
+
 	// สร้าง Object Shield Effect ใหม่
 	newEffect := domain.ActiveEffect{
-		EffectID:       2,              // SHIELD
-		Value:          shieldHP,       // ค่า HP ของ Shield
-		TurnsRemaining: shieldDuration, // ระยะเวลา (อาจจะไม่จำเป็น หรือใช้ร่วมกับ Stance)
+		EffectID:       2,
+		Value:          shieldHP,
+		TurnsRemaining: shieldDuration,
 		SourceID:       caster.ID,
 	}
-	activeEffects = append(activeEffects, newEffect)
+	activeEffects = append(activeEffects, newEffect) // เพิ่ม Shield "อันใหม่" เข้าไป
 	newEffectsJSON, _ := json.Marshal(activeEffects)
 	target.ActiveEffects = newEffectsJSON
 
-	s.appLogger.Info("Applied SHIELD effect", "target", target.ID, "shield_hp", shieldHP, "duration", shieldDuration) // ⭐️ แก้ Log! ⭐️
+	s.appLogger.Info("Applied SHIELD effect", "target", target.ID, "shield_hp", shieldHP, "duration", shieldDuration)
 }
 
 // --- ⭐️ เพิ่ม ผู้เชี่ยวชาญ บัฟ Evasion! ⭐️ ---
@@ -1069,4 +1197,180 @@ func (s *combatService) applyBuffDamageUp(caster *domain.Combatant, target *doma
 	target.ActiveEffects = newEffectsJSON // target คือ caster
 
 	s.appLogger.Info("Applied BUFF_DAMAGE_UP effect", "target", target.ID, "duration", duration, "damage_increase_percent", damageIncreasePercent)
+}
+
+// --- ⭐️ เพิ่ม "ผู้เชี่ยวชาญ" คนใหม่: แปะสถานะ Ignite! ⭐️ ---
+func (s *combatService) applyDebuffIgnite(caster *domain.Combatant, target *domain.Combatant, effectData map[string]interface{}) {
+	// --- การตรวจสอบ Type Assertion ---
+	valueFloat, ok1 := effectData["value"].(float64)       // Damage ต่อเทิร์น
+	durationFloat, ok2 := effectData["duration"].(float64) // ระยะเวลา
+	if !ok1 || !ok2 {
+		s.appLogger.Warn("Invalid or missing value or duration in effectData for applyDebuffIgnite", "data", effectData)
+		return
+	}
+	// -----------------------------
+
+	dotPerTurn := int(math.Round(valueFloat))
+	duration := int(durationFloat)
+	if dotPerTurn < 0 {
+		dotPerTurn = 0
+	} // Damage ไม่ควรติดลบ
+
+	var activeEffects []domain.ActiveEffect
+	if target.ActiveEffects != nil {
+		err := json.Unmarshal(target.ActiveEffects, &activeEffects)
+		if err != nil {
+			s.appLogger.Error("Failed to unmarshal existing active effects for Ignite debuff", err, "target_id", target.ID)
+			activeEffects = []domain.ActiveEffect{} // เริ่มใหม่ถ้า unmarshal ไม่ได้
+		}
+	}
+
+	// --- ⭐️ จัดการ Stack: (อันใหม่ทับอันเก่า) ⭐️ ---
+	var tempEffects []domain.ActiveEffect
+	for _, effect := range activeEffects {
+		if effect.EffectID != 306 { // เก็บ Effect อื่นๆ ที่ไม่ใช่ Ignite
+			tempEffects = append(tempEffects, effect)
+		} else {
+			s.appLogger.Info("Replacing existing Ignite debuff", "target_id", target.ID)
+		}
+	}
+	activeEffects = tempEffects // ใช้ list ที่กรอง Ignite อันเก่าออกแล้ว
+	// -----------------------------------------------------------------
+
+	// สร้าง Object Debuff ใหม่
+	newEffect := domain.ActiveEffect{
+		EffectID:       306,        // DEBUFF_IGNITE
+		Value:          dotPerTurn, // Damage ที่จะทำต่อเทิร์น
+		TurnsRemaining: duration,
+		SourceID:       caster.ID,
+	}
+	activeEffects = append(activeEffects, newEffect)
+
+	// แปลงกลับเป็น JSON
+	newEffectsJSON, err := json.Marshal(activeEffects)
+	if err != nil {
+		s.appLogger.Error("Failed to marshal updated active effects for Ignite debuff", err, "target_id", target.ID)
+		return
+	}
+	target.ActiveEffects = newEffectsJSON
+
+	s.appLogger.Info("Applied DEBUFF_IGNITE effect", "target", target.ID, "duration", duration, "damage_per_turn", dotPerTurn)
+}
+
+// --- ⭐️ เพิ่ม "ผู้เชี่ยวชาญ" คนใหม่: แปะสถานะ Vulnerable! ⭐️ ---
+func (s *combatService) applyDebuffVulnerable(caster *domain.Combatant, target *domain.Combatant, effectData map[string]interface{}) {
+	// --- การตรวจสอบ Type Assertion ---
+	// เวท ID 16 (Analyze) มี BaseValue: 10, Duration: 2
+	valueFloat, ok1 := effectData["value"].(float64)       // % Damage ที่เพิ่มขึ้น
+	durationFloat, ok2 := effectData["duration"].(float64) // ระยะเวลา
+	if !ok1 || !ok2 {
+		s.appLogger.Warn("Invalid or missing value or duration in effectData for applyDebuffVulnerable", "data", effectData)
+		return
+	}
+	// -----------------------------
+
+	vulnerabilityPercent := int(math.Round(valueFloat))
+	duration := int(durationFloat)
+	if vulnerabilityPercent < 0 {
+		vulnerabilityPercent = 0
+	} // ไม่ควรติดลบ
+
+	var activeEffects []domain.ActiveEffect
+	if target.ActiveEffects != nil {
+		err := json.Unmarshal(target.ActiveEffects, &activeEffects)
+		if err != nil {
+			s.appLogger.Error("Failed to unmarshal existing active effects for Vulnerable debuff", err, "target_id", target.ID)
+			activeEffects = []domain.ActiveEffect{} // เริ่มใหม่ถ้า unmarshal ไม่ได้
+		}
+	}
+
+	// --- ⭐️ จัดการ Stack: (อันใหม่ทับอันเก่า) ⭐️ ---
+	var tempEffects []domain.ActiveEffect
+	for _, effect := range activeEffects {
+		if effect.EffectID != 302 { // เก็บ Effect อื่นๆ ที่ไม่ใช่ Vulnerable
+			tempEffects = append(tempEffects, effect)
+		} else {
+			s.appLogger.Info("Replacing existing Vulnerable debuff", "target_id", target.ID)
+		}
+	}
+	activeEffects = tempEffects // ใช้ list ที่กรองอันเก่าออกแล้ว
+	// -----------------------------------------------------------------
+
+	// สร้าง Object Debuff ใหม่
+	newEffect := domain.ActiveEffect{
+		EffectID:       302,                  // DEBUFF_VULNERABLE
+		Value:          vulnerabilityPercent, // % Damage ที่จะได้รับเพิ่ม
+		TurnsRemaining: duration,
+		SourceID:       caster.ID,
+	}
+	activeEffects = append(activeEffects, newEffect)
+
+	// แปลงกลับเป็น JSON
+	newEffectsJSON, err := json.Marshal(activeEffects)
+	if err != nil {
+		s.appLogger.Error("Failed to marshal updated active effects for Vulnerable debuff", err, "target_id", target.ID)
+		return
+	}
+	target.ActiveEffects = newEffectsJSON
+
+	s.appLogger.Info("Applied DEBUFF_VULNERABLE effect", "target", target.ID, "duration", duration, "increase_percent", vulnerabilityPercent)
+}
+
+// --- ⭐️ เพิ่ม "ผู้เชี่ยวชาญ" คนใหม่: แปะสถานะ Retaliation! ⭐️ ---
+func (s *combatService) applyBuffRetaliation(caster *domain.Combatant, target *domain.Combatant, effectData map[string]interface{}) {
+	// --- การตรวจสอบ Type Assertion ---
+	// เวท ID 14 (StaticField) มี BaseValue: 10, Duration: 2 (หลังจากเราแก้ Seeder)
+	valueFloat, ok1 := effectData["value"].(float64)       // Damage ที่จะสะท้อน
+	durationFloat, ok2 := effectData["duration"].(float64) // ระยะเวลา
+	if !ok1 || !ok2 {
+		s.appLogger.Warn("Invalid or missing value or duration in effectData for applyBuffRetaliation", "data", effectData)
+		return
+	}
+	// -----------------------------
+
+	retaliationDamage := int(math.Round(valueFloat))
+	duration := int(durationFloat)
+	if retaliationDamage < 0 {
+		retaliationDamage = 0
+	}
+
+	var activeEffects []domain.ActiveEffect
+	if target.ActiveEffects != nil {
+		err := json.Unmarshal(target.ActiveEffects, &activeEffects)
+		if err != nil {
+			s.appLogger.Error("Failed to unmarshal existing active effects for Retaliation buff", err, "target_id", target.ID)
+			activeEffects = []domain.ActiveEffect{}
+		}
+	}
+
+	// --- ⭐️ จัดการ Stack: (อันใหม่ทับอันเก่า) ⭐️ ---
+	var tempEffects []domain.ActiveEffect
+	for _, effect := range activeEffects {
+		if effect.EffectID != 104 { // เก็บ Effect อื่นๆ ที่ไม่ใช่ Retaliation
+			tempEffects = append(tempEffects, effect)
+		} else {
+			s.appLogger.Info("Replacing existing Retaliation buff", "target_id", target.ID)
+		}
+	}
+	activeEffects = tempEffects
+	// -----------------------------------------------------------------
+
+	// สร้าง Object Buff ใหม่
+	newEffect := domain.ActiveEffect{
+		EffectID:       104,               // BUFF_RETALIATION
+		Value:          retaliationDamage, // Damage ที่จะสะท้อน
+		TurnsRemaining: duration,
+		SourceID:       caster.ID,
+	}
+	activeEffects = append(activeEffects, newEffect)
+
+	// แปลงกลับเป็น JSON
+	newEffectsJSON, err := json.Marshal(activeEffects)
+	if err != nil {
+		s.appLogger.Error("Failed to marshal updated active effects for Retaliation buff", err, "target_id", target.ID)
+		return
+	}
+	target.ActiveEffects = newEffectsJSON
+
+	s.appLogger.Info("Applied BUFF_RETALIATION effect", "target", target.ID, "duration", duration, "retaliation_damage", retaliationDamage)
 }

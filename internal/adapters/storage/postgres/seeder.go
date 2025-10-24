@@ -309,7 +309,7 @@ func seedSpells(tx *gorm.DB) error {
 		{ID: 14, Name: "StaticField", TargetType: domain.TargetTypeSelf, ElementID: 4, MasteryID: 2, APCost: 2, MPCost: 15, // เปลี่ยนชื่อจาก Thorns
 			DisplayNames: datatypes.JSONMap{"en": "Static Field", "th": "สนามไฟฟ้าสถิต"},
 			Descriptions: datatypes.JSONMap{"en": "Creates a weak shield that slightly damages attackers.", "th": "สร้างโล่เบาบางที่สะท้อนความเสียหายเล็กน้อย"},
-			Effects:      []*domain.SpellEffect{{EffectID: 2, BaseValue: 150}, {EffectID: 104, BaseValue: 10}}}, // ลดทั้ง Shield และ Thorns Dmg
+			Effects:      []*domain.SpellEffect{{EffectID: 2, BaseValue: 150, DurationInTurns: 2}, {EffectID: 104, BaseValue: 10, DurationInTurns: 2}}}, // ลดทั้ง Shield และ Thorns Dmg
 		{ID: 15, Name: "Empower", TargetType: domain.TargetTypeSelf, ElementID: 4, MasteryID: 3, APCost: 1, MPCost: 10, // เปลี่ยนชื่อจาก Awaken Power
 			DisplayNames: datatypes.JSONMap{"en": "Empower", "th": "เสริมพลัง"},
 			Descriptions: datatypes.JSONMap{"en": "Slightly increases damage next turn and grants P Stance.", "th": "เพิ่มความเสียหายเล็กน้อยในเทิร์นถัดไปและมอบสถานะ P"},
@@ -405,14 +405,17 @@ func seedEnemies(tx *gorm.DB) error {
 	log.Println("Seeding/Updating enemies and their AI...")
 
 	// ========================================================================
-	// ENEMY 1: TRAINING GOLEM (POTENCY) - (ตัวนี้ AI ดีอยู่แล้ว... แต่เราเพิ่มท่าให้มันเท่ขึ้น!)
+	// ENEMY 1: TRAINING GOLEM (POTENCY)
 	// ========================================================================
 	golemP := domain.Enemy{ID: 1, Name: "TRAINING_GOLEM_POTENCY", DisplayNames: datatypes.JSON(`{"en": "Potency Golem", "th": "โกเลมพลังงาน"}`), ElementID: 4, Level: 1, MaxHP: 250, Initiative: 40, MaxEndurance: 100}
 	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&golemP)
 	abilitiesP := []domain.EnemyAbility{
-		{ID: 1, EnemyID: 1, Name: "P_PUNCH", DisplayNames: datatypes.JSON(`{"en": "Punch", "th": "หมัดตรง"}`), APCost: 1, EffectsJSON: datatypes.JSON(`[{"effect_id": 1, "value": 20}]`)},
-		{ID: 2, EnemyID: 1, Name: "P_TREMOR", DisplayNames: datatypes.JSON(`{"en": "Tremor", "th": "คลื่นพลัง"}`), APCost: 3, EffectsJSON: datatypes.JSON(`[{"effect_id": 1, "value": 40}, {"effect_id": 301, "value": -10, "duration": 2}]`)},
-		{ID: 9, EnemyID: 1, Name: "P_OVERCHARGE", DisplayNames: datatypes.JSON(`{"en": "Overcharge", "th": "ปลุกพลัง"}`), APCost: 2, EffectsJSON: datatypes.JSON(`[{"effect_id": 103, "target": "SELF", "value": 30, "duration": 2}]`)}, // ⭐️ ท่าใหม่!
+		// ⭐️ ท่าพื้นฐาน (Punch) - ไม่ใช้ MP
+		{ID: 1, EnemyID: 1, Name: "P_PUNCH", DisplayNames: datatypes.JSON(`{"en": "Punch", "th": "หมัดตรง"}`), APCost: 1, MPCost: 0, EffectsJSON: datatypes.JSON(`[{"effect_id": 1, "value": 20}]`)},
+		// ⭐️ ท่าไม้ตาย (Tremor) - ใช้ MP 10
+		{ID: 2, EnemyID: 1, Name: "P_TREMOR", DisplayNames: datatypes.JSON(`{"en": "Tremor", "th": "คลื่นพลัง"}`), APCost: 3, MPCost: 10, EffectsJSON: datatypes.JSON(`[{"effect_id": 1, "value": 40}, {"effect_id": 301, "value": -10, "duration": 2}]`)},
+		// ⭐️ ท่าบัฟ (Overcharge) - ใช้ MP 5
+		{ID: 9, EnemyID: 1, Name: "P_OVERCHARGE", DisplayNames: datatypes.JSON(`{"en": "Overcharge", "th": "ปลุกพลัง"}`), APCost: 2, MPCost: 5, EffectsJSON: datatypes.JSON(`[{"effect_id": 103, "target": "SELF", "value": 30, "duration": 2}]`)},
 	}
 	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&abilitiesP)
 	tx.Where("enemy_id = ?", 1).Delete(&domain.EnemyAI{})
@@ -424,14 +427,17 @@ func seedEnemies(tx *gorm.DB) error {
 	tx.Create(&aiRulesP)
 
 	// ========================================================================
-	// ENEMY 2: TRAINING GOLEM (SOLIDITY) - (แก้ไข AI ที่ "พัง"!)
+	// ENEMY 2: TRAINING GOLEM (SOLIDITY)
 	// ========================================================================
 	golemS := domain.Enemy{ID: 2, Name: "TRAINING_GOLEM_SOLIDITY", DisplayNames: datatypes.JSON(`{"en": "Solidity Golem", "th": "โกเลมศิลา"}`), ElementID: 1, Level: 1, MaxHP: 300, Initiative: 35, MaxEndurance: 120}
 	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&golemS)
 	abilitiesS := []domain.EnemyAbility{
-		{ID: 3, EnemyID: 2, Name: "S_SLAP", DisplayNames: datatypes.JSON(`{"en": "Slap", "th": "ตบ"}`), APCost: 1, EffectsJSON: datatypes.JSON(`[{"effect_id": 1, "value": 15}]`)},
-		{ID: 4, EnemyID: 2, Name: "S_HARDEN", DisplayNames: datatypes.JSON(`{"en": "Harden", "th": "กายาหิน"}`), APCost: 2, EffectsJSON: datatypes.JSON(`[{"effect_id": 110, "target": "SELF", "duration": 2}]`)},
-		{ID: 10, EnemyID: 2, Name: "S_QUAKE", DisplayNames: datatypes.JSON(`{"en": "Quake", "th": "ดินไหว"}`), APCost: 2, EffectsJSON: datatypes.JSON(`[{"effect_id": 1, "value": 30}]`)}, // ⭐️ ท่าใหม่!
+		// ⭐️ ท่าพื้นฐาน (Slap) - ไม่ใช้ MP
+		{ID: 3, EnemyID: 2, Name: "S_SLAP", DisplayNames: datatypes.JSON(`{"en": "Slap", "th": "ตบ"}`), APCost: 1, MPCost: 0, EffectsJSON: datatypes.JSON(`[{"effect_id": 1, "value": 15}]`)},
+		// ⭐️ ท่าบัฟ (Harden) - ใช้ MP 5
+		{ID: 4, EnemyID: 2, Name: "S_HARDEN", DisplayNames: datatypes.JSON(`{"en": "Harden", "th": "กายาหิน"}`), APCost: 2, MPCost: 5, EffectsJSON: datatypes.JSON(`[{"effect_id": 110, "target": "SELF", "duration": 2}]`)},
+		// ⭐️ ท่าไม้ตาย (Quake) - ใช้ MP 10
+		{ID: 10, EnemyID: 2, Name: "S_QUAKE", DisplayNames: datatypes.JSON(`{"en": "Quake", "th": "ดินไหว"}`), APCost: 2, MPCost: 10, EffectsJSON: datatypes.JSON(`[{"effect_id": 1, "value": 30}]`)},
 	}
 	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&abilitiesS)
 	tx.Where("enemy_id = ?", 2).Delete(&domain.EnemyAI{})
@@ -443,14 +449,17 @@ func seedEnemies(tx *gorm.DB) error {
 	tx.Create(&aiRulesS)
 
 	// ========================================================================
-	// ENEMY 3: TRAINING GOLEM (LIQUIDITY) - (แก้ไข AI ที่ "พัง"!)
+	// ENEMY 3: TRAINING GOLEM (LIQUIDITY)
 	// ========================================================================
 	golemL := domain.Enemy{ID: 3, Name: "TRAINING_GOLEM_LIQUIDITY", DisplayNames: datatypes.JSON(`{"en": "Liquidity Golem", "th": "โกเลมวารี"}`), ElementID: 2, Level: 1, MaxHP: 220, Initiative: 45, MaxEndurance: 80}
 	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&golemL)
 	abilitiesL := []domain.EnemyAbility{
-		{ID: 5, EnemyID: 3, Name: "L_SPLASH", DisplayNames: datatypes.JSON(`{"en": "Splash", "th": "สาดน้ำ"}`), APCost: 2, EffectsJSON: datatypes.JSON(`[{"effect_id": 1, "value": 25}]`)},
-		{ID: 6, EnemyID: 3, Name: "L_REGEN", DisplayNames: datatypes.JSON(`{"en": "Regenerate", "th": "ฟื้นฟู"}`), APCost: 2, EffectsJSON: datatypes.JSON(`[{"effect_id": 100, "target": "SELF", "value": 20, "duration": 3}]`)},
-		{ID: 11, EnemyID: 3, Name: "L_DROWN", DisplayNames: datatypes.JSON(`{"en": "Drown", "th": "กระแสน้ำ"}`), APCost: 3, EffectsJSON: datatypes.JSON(`[{"effect_id": 302, "target": "PLAYER", "value": 20, "duration": 2}]`)}, // ⭐️ ท่าใหม่! (Vulnerable)
+		// ⭐️ ท่าพื้นฐาน (Splash) - ใช้ MP 5 (เพราะมัน 2 AP)
+		{ID: 5, EnemyID: 3, Name: "L_SPLASH", DisplayNames: datatypes.JSON(`{"en": "Splash", "th": "สาดน้ำ"}`), APCost: 2, MPCost: 5, EffectsJSON: datatypes.JSON(`[{"effect_id": 1, "value": 25}]`)},
+		// ⭐️ ท่าบัฟ (Regen) - ใช้ MP 10
+		{ID: 6, EnemyID: 3, Name: "L_REGEN", DisplayNames: datatypes.JSON(`{"en": "Regenerate", "th": "ฟื้นฟู"}`), APCost: 2, MPCost: 10, EffectsJSON: datatypes.JSON(`[{"effect_id": 100, "target": "SELF", "value": 20, "duration": 3}]`)},
+		// ⭐️ ท่าไม้ตาย (Drown) - ใช้ MP 15
+		{ID: 11, EnemyID: 3, Name: "L_DROWN", DisplayNames: datatypes.JSON(`{"en": "Drown", "th": "กระแสน้ำ"}`), APCost: 3, MPCost: 15, EffectsJSON: datatypes.JSON(`[{"effect_id": 302, "target": "PLAYER", "value": 20, "duration": 2}]`)},
 	}
 	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&abilitiesL)
 	tx.Where("enemy_id = ?", 3).Delete(&domain.EnemyAI{})
@@ -462,14 +471,17 @@ func seedEnemies(tx *gorm.DB) error {
 	tx.Create(&aiRulesL)
 
 	// ========================================================================
-	// ENEMY 4: TRAINING GOLEM (TEMPO) - (เพิ่มท่าให้ครบ 3!)
+	// ENEMY 4: TRAINING GOLEM (TEMPO)
 	// ========================================================================
 	golemG := domain.Enemy{ID: 4, Name: "TRAINING_GOLEM_TEMPO", DisplayNames: datatypes.JSON(`{"en": "Tempo Golem", "th": "โกเลมวายุ"}`), ElementID: 3, Level: 1, MaxHP: 200, Initiative: 55, MaxEndurance: 70}
 	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&golemG)
 	abilitiesG := []domain.EnemyAbility{
-		{ID: 7, EnemyID: 4, Name: "G_WIND_SLASH", DisplayNames: datatypes.JSON(`{"en": "Wind Slash", "th": "คมลม"}`), APCost: 1, EffectsJSON: datatypes.JSON(`[{"effect_id": 1, "value": 25}]`)},
-		{ID: 8, EnemyID: 4, Name: "G_EVADE", DisplayNames: datatypes.JSON(`{"en": "Evade", "th": "หลบหลีก"}`), APCost: 2, EffectsJSON: datatypes.JSON(`[{"effect_id": 102, "target": "SELF", "value": 50, "duration": 1}]`)},
-		{ID: 12, EnemyID: 4, Name: "G_TORNADO", DisplayNames: datatypes.JSON(`{"en": "Tornado", "th": "พายุหมุน"}`), APCost: 3, EffectsJSON: datatypes.JSON(`[{"effect_id": 1, "value": 50}]`)}, // ⭐️ ท่าใหม่!
+		// ⭐️ ท่าพื้นฐาน (Wind Slash) - ไม่ใช้ MP (เพราะ 1 AP)
+		{ID: 7, EnemyID: 4, Name: "G_WIND_SLASH", DisplayNames: datatypes.JSON(`{"en": "Wind Slash", "th": "คมลม"}`), APCost: 1, MPCost: 0, EffectsJSON: datatypes.JSON(`[{"effect_id": 1, "value": 25}]`)},
+		// ⭐️ ท่าบัฟ (Evade) - ใช้ MP 5
+		{ID: 8, EnemyID: 4, Name: "G_EVADE", DisplayNames: datatypes.JSON(`{"en": "Evade", "th": "หลบหลีก"}`), APCost: 2, MPCost: 5, EffectsJSON: datatypes.JSON(`[{"effect_id": 102, "target": "SELF", "value": 50, "duration": 1}]`)},
+		// ⭐️ ท่าไม้ตาย (Tornado) - ใช้ MP 15
+		{ID: 12, EnemyID: 4, Name: "G_TORNADO", DisplayNames: datatypes.JSON(`{"en": "Tornado", "th": "พายุหมุน"}`), APCost: 3, MPCost: 15, EffectsJSON: datatypes.JSON(`[{"effect_id": 1, "value": 50}]`)},
 	}
 	tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&abilitiesG)
 	tx.Where("enemy_id = ?", 4).Delete(&domain.EnemyAI{})

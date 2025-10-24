@@ -10,7 +10,6 @@ import (
 )
 
 // --- นี่คือบ้านใหม่ของผู้เชี่ยวชาญด้านการคำนวณ ---
-// ⭐️ เพิ่ม argument: powerModifier float64 ⭐️
 func (s *combatService) calculateEffectValue(caster *domain.Combatant, target *domain.Combatant, spell *domain.Spell, effect *domain.SpellEffect, powerModifier float64) (float64, error) {
 	baseValue := effect.BaseValue
 	masteryBonus := 0.0                                             // TODO: Implement mastery bonus
@@ -25,19 +24,30 @@ func (s *combatService) calculateEffectValue(caster *domain.Combatant, target *d
 
 	elementalModifier := 1.0 // ค่าเริ่มต้น
 	var err error
-	// --- ⭐️ เพิ่มเช็ค: Heal ไม่ควรสนธาตุ! ⭐️ ---
-	isHealEffect := (effect.EffectID == 3 || effect.EffectID == 100) // ID 3 = Heal, 100 = HoT
-	if !isHealEffect {
+
+	// --- ⭐️ ณัชชาแก้ตรงนี้! ⭐️ ---
+	// เปลี่ยนชื่อ isHealEffect เป็น isFriendlyEffect
+	// และเพิ่ม ID ของบัฟทั้งหมด (Shield, Regen, Buffs ฯลฯ) เข้าไปในเงื่อนไข
+	isFriendlyEffect := (effect.EffectID == 2 || // SHIELD
+		effect.EffectID == 3 || // HEAL
+		effect.EffectID == 100 || // BUFF_HP_REGEN
+		effect.EffectID == 101 || // BUFF_MP_REGEN
+		effect.EffectID == 102 || // BUFF_EVASION
+		effect.EffectID == 103 || // BUFF_DMG_UP
+		effect.EffectID == 104 || // BUFF_RETALIATION
+		effect.EffectID == 110) // BUFF_DEFENSE_UP
+
+	if !isFriendlyEffect { // ⭐️ ใช้ตัวแปรใหม่
 		elementalModifier, err = s.getElementalModifier(spell.ElementID, targetElementID)
 		if err != nil {
-			// อาจจะแค่ Log Warning แล้วใช้ 1.0 แทนที่จะ Return Error?
 			s.appLogger.Error("Failed to get elemental modifier", err, "spell_element", spell.ElementID, "target_element", targetElementID)
 			elementalModifier = 1.0
 		}
 	} else {
-		s.appLogger.Info("Skipping elemental modifier for Heal effect", "effect_id", effect.EffectID)
+		// ⭐️ แก้ Log ให้สื่อความหมายมากขึ้น
+		s.appLogger.Info("Skipping elemental modifier for friendly/utility effect", "effect_id", effect.EffectID)
 	}
-	// ------------------------------------
+	// --- ⭐️ สิ้นสุด ⭐️ ---
 
 	buffDebuffModifier := 1.0 // ค่าเริ่มต้น
 
@@ -50,9 +60,8 @@ func (s *combatService) calculateEffectValue(caster *domain.Combatant, target *d
 		// --- ⭐️ ปรับปรุง Logic Buff/Debuff ⭐️ ---
 		switch activeEffect.EffectID {
 		case 110: // BUFF_DEFENSE_UP (กายาเหล็ก/ผิวศิลา)
-			if !isHealEffect { // บัฟป้องกัน ไม่ควรลด Heal
-				// สมมติว่า BaseValue ของ Effect 110 คือ % ลดทอน (เช่น 0 = ไม่ลด, 50 = ลด 50%)
-				// หรืออาจจะเป็นค่า Def คงที่ที่ต้องเอาไปคำนวณร่วมกับ Atk? -> ตอนนี้ทำแบบ % ไปก่อน
+			// ⭐️ ณัชชาแก้ตรงนี้: ใช้ isFriendlyEffect เช็ค
+			if !isFriendlyEffect { // บัฟป้องกัน ไม่ควรลด Heal/Shield
 				reductionPercent := 0.5 // Default ลด 50% ถ้า BaseValue = 0 (จาก Harden)
 				if activeEffect.Value > 0 {
 					reductionPercent = float64(activeEffect.Value) / 100.0 // ถ้ามี Value ให้ใช้ค่านั้น
@@ -61,8 +70,8 @@ func (s *combatService) calculateEffectValue(caster *domain.Combatant, target *d
 				s.appLogger.Info("Applying DEFENSE_UP modifier", "target_id", target.ID, "reduction", reductionPercent)
 			}
 		case 302: // DEBUFF_VULNERABLE (เปิดจุดอ่อน/Analyze)
-			if !isHealEffect { // Vulnerable ไม่ควรเพิ่ม Heal
-				// สมมติว่า BaseValue ของ Effect 302 คือ % ที่โดนแรงขึ้น
+			// ⭐️ ณัชชาแก้ตรงนี้: ใช้ isFriendlyEffect เช็ค
+			if !isFriendlyEffect { // Vulnerable ไม่ควรเพิ่ม Heal/Shield
 				increasePercent := float64(activeEffect.Value) / 100.0
 				buffDebuffModifier *= (1.0 + increasePercent) // เพิ่ม Damage ตาม %
 				s.appLogger.Info("Applying VULNERABLE modifier", "target_id", target.ID, "increase", increasePercent)
@@ -83,7 +92,8 @@ func (s *combatService) calculateEffectValue(caster *domain.Combatant, target *d
 	for _, activeEffect := range casterEffects {
 		switch activeEffect.EffectID {
 		case 103: // BUFF_DAMAGE_UP (Caster)
-			if !isHealEffect { // Damage Up ไม่ควรเพิ่ม Heal
+			// ⭐️ ณัชชาแก้ตรงนี้: ใช้ isFriendlyEffect เช็ค
+			if !isFriendlyEffect { // Damage Up ไม่ควรเพิ่ม Heal/Shield
 				increasePercent := float64(activeEffect.Value) / 100.0
 				buffDebuffModifier *= (1.0 + increasePercent) // เพิ่ม Damage ตาม % จากบัฟผู้ร่าย
 				s.appLogger.Info("Applying DAMAGE_UP modifier (from Caster)", "caster_id", caster.ID, "increase", increasePercent)
@@ -99,8 +109,9 @@ func (s *combatService) calculateEffectValue(caster *domain.Combatant, target *d
 	finalValue = math.Round(finalValue*100) / 100
 
 	logMessage := "Effect Value Calculation"
-	if isHealEffect {
-		logMessage = "Heal Value Calculation"
+	// ⭐️ ณัชชาแก้ตรงนี้: ใช้ isFriendlyEffect เช็ค
+	if isFriendlyEffect {
+		logMessage = "Friendly Effect Value Calculation" // ⭐️ แก้ Log
 	}
 
 	s.appLogger.Info(logMessage,

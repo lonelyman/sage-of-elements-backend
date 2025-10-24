@@ -31,6 +31,7 @@ type EnemyAbility struct {
 	DisplayNames datatypes.JSON `gorm:"type:jsonb;comment:ชื่อท่าที่แสดงในเกม"`
 	Descriptions datatypes.JSON `gorm:"type:jsonb;comment:คำอธิบายการทำงานของท่า"`
 	APCost       int            `gorm:"not null;comment:ต้นทุน AP ที่ศัตรูต้องใช้"`
+	MPCost       int            `gorm:"default:0"`
 	EffectsJSON  datatypes.JSON `gorm:"type:jsonb;comment:ผลลัพธ์ของท่าโจมตีในรูปแบบ JSON"`
 }
 

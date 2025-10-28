@@ -2,164 +2,260 @@
 package combat
 
 import (
-	"encoding/json"
 	"sage-of-elements-backend/internal/domain"
-	"sage-of-elements-backend/pkg/apperrors"
 	"sort"
 )
 
-func (s *combatService) processAITurn(match *domain.CombatMatch, aiCombatant *domain.Combatant) (*domain.CombatMatch, error) {
-	// 1. ตรวจสอบข้อมูลศัตรู (Nil check) - (เหมือนเดิม)
-	if aiCombatant.Enemy == nil {
-		s.appLogger.Warn("AI Combatant has no Enemy data loaded, skipping turn.", "ai_combatant_id", aiCombatant.ID)
-		match = s.endTurn(match)
-		match, err := s.startNewTurn(match)
-		if err != nil {
-			return nil, err
+// ==================== AI Manager ====================
+// ไฟล์นี้เป็น main orchestrator สำหรับ AI turn
+// ทำหน้าที่ประสานงานระหว่าง decision making และ action execution
+//
+// โครงสร้าง AI System:
+// - ai_manager.go: Main orchestrator (ไฟล์นี้)
+// - ai_decision.go: Decision making (condition checking, action selection)
+// - ai_execution.go: Action execution (resource deduction, effect application)
+
+// processAllAITurns ประมวลผลเทิร์นของ AI ทั้งหมดจนกว่าจะกลับมาเป็นเทิร์นผู้เล่น
+// หรือเกมจบลง (ป้องกัน infinite loop โดยจำกัดจำนวนเทิร์นสูงสุด)
+func (s *combatService) processAllAITurns(match *domain.CombatMatch) (*domain.CombatMatch, error) {
+	const maxConsecutiveAITurns = 20 // ป้องกัน infinite loop
+	turnsProcessed := 0
+
+	for turnsProcessed < maxConsecutiveAITurns {
+		// ตรวจสอบว่าเกมจบแล้วหรือยัง
+		if match.Status != domain.MatchInProgress {
+			s.appLogger.Info("Match ended during AI turns",
+				"status", match.Status,
+				"turns_processed", turnsProcessed,
+			)
+			return match, nil
 		}
-		return match, nil
+
+		// ดูว่าเทิร์นปัจจุบันเป็นของ AI หรือไม่
+		currentCombatant := s.findCombatantByID(match, match.CurrentTurn)
+		if currentCombatant == nil {
+			s.appLogger.Error("Current combatant not found",
+				nil,
+				"current_turn_id", match.CurrentTurn,
+			)
+			break
+		}
+
+		// ถ้าเป็นเทิร์นผู้เล่น (CharacterID != nil) ให้หยุด loop
+		if currentCombatant.CharacterID != nil {
+			s.appLogger.Debug("Player turn reached, stopping AI loop",
+				"turns_processed", turnsProcessed,
+			)
+			break
+		}
+
+		// ถ้าเป็น AI ให้ประมวลผลเทิร์น
+		if currentCombatant.EnemyID != nil {
+			s.appLogger.Info("Processing AI turn",
+				"ai_id", currentCombatant.ID,
+				"turn_count", turnsProcessed+1,
+			)
+
+			var err error
+			match, err = s.processAITurn(match, currentCombatant)
+			if err != nil {
+				return nil, err
+			}
+
+			// ตรวจสอบจบเกมหลังจาก AI เล่นเสร็จ
+			match = s.checkMatchEndCondition(match)
+
+			turnsProcessed++
+		}
 	}
 
-	// 2. ดึงข้อมูล AI Rules และเรียงลำดับ - (เหมือนเดิม)
+	if turnsProcessed >= maxConsecutiveAITurns {
+		s.appLogger.Warn("Max consecutive AI turns reached",
+			"max_turns", maxConsecutiveAITurns,
+		)
+	}
+
+	return match, nil
+}
+
+// processAITurn คือฟังก์ชันหลักในการประมวลผลเทิร์นของ AI **1 เทิร์น**
+// จะทำงานต่อเนื่องจนกว่า AP จะหมด หรือไม่มี action ที่ทำได้
+func (s *combatService) processAITurn(match *domain.CombatMatch, aiCombatant *domain.Combatant) (*domain.CombatMatch, error) {
+	s.appLogger.Info("🤖 AI turn started",
+		"ai_id", aiCombatant.ID,
+		"match_id", match.ID,
+		"turn_number", match.TurnNumber,
+	)
+
+	// 1. Validate AI combatant data
+	if !s._ValidateAICombatant(aiCombatant) {
+		s.appLogger.Warn("Invalid AI combatant, skipping turn",
+			"ai_id", aiCombatant.ID,
+		)
+		return s._EndAITurn(match)
+	}
+
+	// 2. Prepare AI decision context
+	ctx := s._PrepareDecisionContext(match, aiCombatant)
+	if ctx == nil {
+		s.appLogger.Error("Failed to prepare AI decision context",
+			nil,
+			"ai_id", aiCombatant.ID,
+		)
+		return s._EndAITurn(match)
+	}
+
+	// 3. Execute AI action loop
+	err := s._ExecuteActionLoop(ctx, aiCombatant)
+	if err != nil {
+		s.appLogger.Error("AI action loop failed", err,
+			"ai_id", aiCombatant.ID,
+		)
+		return nil, err
+	}
+
+	// 4. End AI turn and start next turn
+	s.appLogger.Info("🤖 AI turn ended",
+		"ai_id", aiCombatant.ID,
+		"final_ap", aiCombatant.CurrentAP,
+		"final_mp", aiCombatant.CurrentMP,
+	)
+
+	return s._EndAITurn(match)
+}
+
+// ==================== AI Turn Management ====================
+
+// _ValidateAICombatant ตรวจสอบว่า AI combatant มีข้อมูลครบถ้วนหรือไม่
+func (s *combatService) _ValidateAICombatant(aiCombatant *domain.Combatant) bool {
+	if aiCombatant.Enemy == nil {
+		s.appLogger.Warn("AI combatant has no enemy data",
+			"ai_id", aiCombatant.ID,
+		)
+		return false
+	}
+
+	if len(aiCombatant.Enemy.AI) == 0 {
+		s.appLogger.Warn("AI combatant has no AI rules",
+			"ai_id", aiCombatant.ID,
+		)
+		return false
+	}
+
+	return true
+}
+
+// _PrepareDecisionContext สร้าง context สำหรับการตัดสินใจของ AI
+func (s *combatService) _PrepareDecisionContext(
+	match *domain.CombatMatch,
+	aiCombatant *domain.Combatant,
+) *AIDecisionContext {
+	// หา player target
+	playerTarget := s.findPlayerCombatant(match)
+	if playerTarget == nil {
+		s.appLogger.Error("Player combatant not found in match",
+			nil,
+			"match_id", match.ID,
+		)
+		return nil
+	}
+
+	// เรียง AI rules ตาม priority (น้อยไปมาก = ทำก่อน)
 	aiRules := aiCombatant.Enemy.AI
 	sort.Slice(aiRules, func(i, j int) bool {
 		return aiRules[i].Priority < aiRules[j].Priority
 	})
 
-	// 3. หา "เป้าหมาย" (ผู้เล่น) - (เหมือนเดิม)
-	target := s.findPlayerCombatant(match)
-	if target == nil {
-		return nil, apperrors.SystemError("player target not found in match")
+	return &AIDecisionContext{
+		AICombatant:    aiCombatant,
+		PlayerTarget:   playerTarget,
+		Match:          match,
+		AvailableRules: aiRules,
 	}
+}
 
-	// --- ⭐️ ณัชชาอัปเกรด: "Action Loop" (สมองใหม่!) ⭐️ ---
-	// นี่คือ Loop หลักที่ AI จะ "คิด"
-	// มันจะวน Loop ตราบใดที่ยังมี AP เหลือ
-	// (เราใส่ maxActionsPerTurn (เช่น 5) ไว้... กันเหนียว เผื่อมี Bug แล้วมันวน Loop ไม่หยุด)
+// _ExecuteActionLoop วน loop ในการเลือกและ execute actions
+func (s *combatService) _ExecuteActionLoop(
+	ctx *AIDecisionContext,
+	aiCombatant *domain.Combatant,
+) error {
 	const maxActionsPerTurn = 5
-	actionsTakenThisTurn := 0
+	actionsTaken := 0
 
-	for aiCombatant.CurrentAP > 0 && actionsTakenThisTurn < maxActionsPerTurn {
-		actionsTakenThisTurn++
-		s.appLogger.Info("AI starts thinking...", "ai_id", aiCombatant.ID, "current_ap", aiCombatant.CurrentAP, "action_loop_count", actionsTakenThisTurn)
+	s.appLogger.Debug("Starting AI action loop",
+		"ai_id", aiCombatant.ID,
+		"initial_ap", aiCombatant.CurrentAP,
+		"max_actions", maxActionsPerTurn,
+	)
 
-		// 4. (ใน Loop) วน Loop เช็ค "กฎ" แต่ละข้อ เพื่อหา Action ที่จะทำ
-		var actionToPerform *domain.EnemyAbility
-		var targetCombatant *domain.Combatant // เป้าหมายของท่านี้
+	// Loop จนกว่า AP จะหมด หรือไม่มี action ที่ทำได้
+	for aiCombatant.CurrentAP > 0 && actionsTaken < maxActionsPerTurn {
+		actionsTaken++
 
-		for _, rule := range aiRules {
-			conditionMet := false
+		s.appLogger.Debug("AI action loop iteration",
+			"iteration", actionsTaken,
+			"current_ap", aiCombatant.CurrentAP,
+		)
 
-			// --- "สมอง" ส่วนเช็คเงื่อนไข (เหมือนเดิม) ---
-			switch rule.Condition {
-			case domain.AIConditionAlways:
-				conditionMet = true
-			case domain.AIConditionTurnIs:
-				if float64(match.TurnNumber) == rule.ConditionValue {
-					conditionMet = true
-				}
-			case domain.AIConditionSelfHPBelow:
-				if aiCombatant.Enemy.MaxHP == 0 {
-					break
-				}
-				currentHPRatio := float64(aiCombatant.CurrentHP) / float64(aiCombatant.Enemy.MaxHP)
-				if currentHPRatio <= rule.ConditionValue {
-					conditionMet = true
-				}
-			}
-			// --- สิ้นสุดการเช็คเงื่อนไข ---
+		// เลือก action ถัดไป
+		selectedAction := s.SelectNextAction(ctx)
 
-			// --- ถ้าเงื่อนไขเป็นจริง... ⭐️ "เช็คทรัพยากร" ก่อน! ⭐️ ---
-			if conditionMet {
-				tempAction := rule.AbilityToUse
-				if tempAction == nil {
-					continue // กฎนี้ไม่มีท่าให้ใช้
-				}
-
-				// ⭐️ Check 1: AP พอไหม? (สำหรับท่านี้)
-				canAffordAP := aiCombatant.CurrentAP >= tempAction.APCost
-				// ⭐️ Check 2: MP พอไหม? (สำหรับท่านี้)
-				canAffordMP := aiCombatant.CurrentMP >= tempAction.MPCost
-
-				if canAffordAP && canAffordMP {
-					// ⭐️ เย้! เจอท่าที่จะใช้แล้ว!
-					actionToPerform = tempAction
-
-					// กำหนดเป้าหมาย (เหมือนเดิม)
-					switch rule.Target {
-					case domain.AITargetPlayer:
-						targetCombatant = target
-					case domain.AITargetSelf:
-						targetCombatant = aiCombatant
-					default:
-						targetCombatant = target
-					}
-
-					s.appLogger.Info("AI found a valid action to perform", "ability_name", actionToPerform.Name, "rule_priority", rule.Priority)
-					break // ⭐️ หยุดหา "กฎ" (เพราะเจอกฎที่ Priority สูงสุดที่ทำได้แล้ว)
-
-				} else {
-					// ถ้าเงื่อนไขผ่าน... แต่ AP/MP ไม่พอ (สำหรับท่านี้)... ให้ข้ามไปดูกฎ Priority ถัดไป
-					s.appLogger.Debug("AI condition met, but cannot afford ability. Checking next rule.", "ability_name", tempAction.Name, "rule_priority", rule.Priority, "need_ap", tempAction.APCost, "need_mp", tempAction.MPCost)
-				}
-			}
-		} // --- สิ้นสุด For Loop ของ "กฎ" (aiRules) ---
-
-		// 5. (ใน Loop) ถ้ามี Action ที่จะทำ... ก็ลงมือเลย!
-		if actionToPerform != nil {
-			// (เราเช็ค AP/MP ไปแล้วตอนเลือก)
-			// หัก AP
-			aiCombatant.CurrentAP -= actionToPerform.APCost
-
-			// หัก MP (ถ้าใช้)
-			if actionToPerform.MPCost > 0 {
-				aiCombatant.CurrentMP -= actionToPerform.MPCost
-				if aiCombatant.CurrentMP < 0 {
-					aiCombatant.CurrentMP = 0
-				}
-			}
-			s.appLogger.Info("AI EXECUTING action", "ability_name", actionToPerform.Name, "new_ap", aiCombatant.CurrentAP, "new_mp", aiCombatant.CurrentMP)
-
-			// สร้าง "เวทจำลอง" (เหมือนเดิม)
-			dummySpell := &domain.Spell{
-				ElementID: aiCombatant.Enemy.ElementID,
-			}
-
-			// ประมวลผล "Effects" (เหมือนเดิม)
-			var effects []map[string]interface{}
-			json.Unmarshal(actionToPerform.EffectsJSON, &effects)
-
-			for _, effectData := range effects {
-				s.applyEffect(aiCombatant, targetCombatant, effectData, dummySpell)
-			}
-
-			// ⭐️⭐️⭐️ ถ้า AP หมดเกลี้ยง... ก็ไม่ต้องคิดต่อแล้ว ⭐️⭐️⭐️
-			if aiCombatant.CurrentAP <= 0 {
-				s.appLogger.Info("AI has 0 AP, stopping action loop.", "ai_id", aiCombatant.ID)
-				break // ⭐️ ออกจาก "Action Loop" (for aiCombatant.CurrentAP > 0)
-			}
-
-		} else {
-			// ⭐️ ถ้าวน "กฎ" จนครบแล้ว... แต่ "ไม่มีท่าไหนที่ทำได้เลย" (ทั้งที่ AP ยังเหลือ)
-			s.appLogger.Info("AI has AP but found no valid action (all rules failed or unaffordable), stopping action loop.", "ai_id", aiCombatant.ID, "current_ap", aiCombatant.CurrentAP)
-			break // ⭐️ ออกจาก "Action Loop" (for aiCombatant.CurrentAP > 0)
+		// ถ้าไม่เจอ action ที่ทำได้ ให้หยุด loop
+		if selectedAction == nil {
+			s.appLogger.Info("No valid action found, ending AI turn",
+				"ai_id", aiCombatant.ID,
+				"ap_remaining", aiCombatant.CurrentAP,
+			)
+			break
 		}
 
-	} // --- ⭐️ สิ้นสุด "Action Loop" (for aiCombatant.CurrentAP > 0) ⭐️ ---
+		// Execute action ที่เลือก
+		err := s.ExecuteAIAction(aiCombatant, selectedAction)
+		if err != nil {
+			return err
+		}
 
-	if actionsTakenThisTurn >= maxActionsPerTurn {
-		s.appLogger.Warn("AI reached max actions per turn, force ending turn.", "ai_id", aiCombatant.ID)
+		// ตรวจสอบว่ายัง loop ต่อได้ไหม
+		if aiCombatant.CurrentAP <= 0 {
+			s.appLogger.Info("AI AP depleted, ending action loop",
+				"ai_id", aiCombatant.ID,
+			)
+			break
+		}
 	}
 
-	// 6. จบเทิร์นของตัวเอง (ย้ายมาอยู่นอก Loop)
-	s.appLogger.Info("AI ended its turn.", "match_id", match.ID)
+	// ตรวจสอบว่าถึง max actions หรือไม่
+	if actionsTaken >= maxActionsPerTurn {
+		s.appLogger.Warn("AI reached max actions per turn",
+			"ai_id", aiCombatant.ID,
+			"max_actions", maxActionsPerTurn,
+		)
+	}
+
+	s.appLogger.Info("AI action loop completed",
+		"ai_id", aiCombatant.ID,
+		"actions_taken", actionsTaken,
+		"final_ap", aiCombatant.CurrentAP,
+	)
+
+	return nil
+}
+
+// _EndAITurn จบเทิร์นของ AI และเริ่มเทิร์นถัดไป
+func (s *combatService) _EndAITurn(match *domain.CombatMatch) (*domain.CombatMatch, error) {
+	s.appLogger.Debug("Ending AI turn", "match_id", match.ID)
+
+	// จบเทิร์นปัจจุบัน
 	match = s.endTurn(match)
 
-	// 7. เตรียมความพร้อมสำหรับเทิร์นของ "คนถัดไป" (เหมือนเดิม)
-	match, err := s.startNewTurn(match)
+	// เริ่มเทิร์นถัดไป
+	updatedMatch, err := s.startNewTurn(match)
 	if err != nil {
+		s.appLogger.Error("Failed to start new turn after AI", err,
+			"match_id", match.ID,
+		)
 		return nil, err
 	}
 
-	return match, nil
+	return updatedMatch, nil
 }

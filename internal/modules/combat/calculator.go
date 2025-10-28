@@ -3,53 +3,71 @@ package combat
 
 import (
 	"encoding/json"
-	"fmt"
 	"math"
 	"sage-of-elements-backend/internal/domain"
 	"strconv"
 )
 
-// --- นี่คือบ้านใหม่ของผู้เชี่ยวชาญด้านการคำนวณ ---
+// --- นี่คือบ้านของฟังก์ชันช่วยเหลือสำหรับการคำนวณ ---
+
+// ==================== DEPRECATED FUNCTIONS ====================
+// calculateEffectValue - DEPRECATED: ใช้ใน effect_direct.go เท่านั้น (ระบบเก่า)
+// ระบบใหม่ใช้ CalculateInitialEffectValues + CalculateCombinedModifiers ใน spell_calculation.go แทน
 func (s *combatService) calculateEffectValue(caster *domain.Combatant, target *domain.Combatant, spell *domain.Spell, effect *domain.SpellEffect, powerModifier float64) (float64, error) {
 	baseValue := effect.BaseValue
-	masteryBonus := 0.0                                             // TODO: Implement mastery bonus
-	talentBonus := s.getTalentBonus(caster, spell, effect.EffectID) // ⭐️ ส่ง EffectID ไปด้วย! ⭐️
+	masteryBonus := 0.0
+
+	// ใช้ calculateTalentBonusFromRecipe แทน getTalentBonus เก่า
+	var talentBonus float64
+	if caster.Character == nil {
+		talentBonus = 0.0
+	} else if spell.ElementID <= 4 {
+		// T0: ใช้ talent เดียว
+		ingredients := map[uint]int{spell.ElementID: 1}
+		talentBonus = s.calculateTalentBonusFromRecipe(ingredients, caster.Character)
+	} else {
+		// T1+: ต้องหา recipe
+		recipe, err := s.gameDataRepo.FindRecipeByOutputElementID(spell.ElementID)
+		if err != nil || recipe == nil {
+			talentBonus = 0.0
+		} else {
+			ingredientCount := make(map[uint]int)
+			for _, ing := range recipe.Ingredients {
+				ingredientCount[ing.InputElementID]++
+			}
+			talentBonus = s.calculateTalentBonusFromRecipe(ingredientCount, caster.Character)
+		}
+	}
 
 	var targetElementID uint = 0
 	if target.EnemyID != nil && target.Enemy != nil {
 		targetElementID = target.Enemy.ElementID
 	} else if target.CharacterID != nil && target.Character != nil {
-		targetElementID = target.Character.PrimaryElementID // สมมติว่า Player ก็มีธาตุ
+		targetElementID = target.Character.PrimaryElementID
 	}
 
-	elementalModifier := 1.0 // ค่าเริ่มต้น
+	elementalModifier := 1.0
 	var err error
 
-	// --- ⭐️ ณัชชาแก้ตรงนี้! ⭐️ ---
-	// เปลี่ยนชื่อ isHealEffect เป็น isFriendlyEffect
-	// และเพิ่ม ID ของบัฟทั้งหมด (Shield, Regen, Buffs ฯลฯ) เข้าไปในเงื่อนไข
-	isFriendlyEffect := (effect.EffectID == 2 || // SHIELD
-		effect.EffectID == 3 || // HEAL
-		effect.EffectID == 100 || // BUFF_HP_REGEN
-		effect.EffectID == 101 || // BUFF_MP_REGEN
-		effect.EffectID == 102 || // BUFF_EVASION
-		effect.EffectID == 103 || // BUFF_DMG_UP
-		effect.EffectID == 104 || // BUFF_RETALIATION
-		effect.EffectID == 110) // BUFF_DEFENSE_UP
+	// เช็คว่าเป็น friendly effect หรือไม่
+	isFriendlyEffect := (effect.EffectID == 1102 || // SHIELD
+		effect.EffectID == 1103 || // HEAL
+		effect.EffectID == 2101 || // BUFF_HP_REGEN
+		effect.EffectID == 2102 || // BUFF_MP_REGEN
+		effect.EffectID == 2201 || // BUFF_EVASION
+		effect.EffectID == 2202 || // BUFF_DMG_UP
+		effect.EffectID == 2203 || // BUFF_RETALIATION
+		effect.EffectID == 2204) // BUFF_DEFENSE_UP
 
-	if !isFriendlyEffect { // ⭐️ ใช้ตัวแปรใหม่
+	if !isFriendlyEffect {
 		elementalModifier, err = s.getElementalModifier(spell.ElementID, targetElementID)
 		if err != nil {
 			s.appLogger.Error("Failed to get elemental modifier", err, "spell_element", spell.ElementID, "target_element", targetElementID)
 			elementalModifier = 1.0
 		}
-	} else {
-		// ⭐️ แก้ Log ให้สื่อความหมายมากขึ้น
-		s.appLogger.Info("Skipping elemental modifier for friendly/utility effect", "effect_id", effect.EffectID)
 	}
-	// --- ⭐️ สิ้นสุด ⭐️ ---
 
-	buffDebuffModifier := 1.0 // ค่าเริ่มต้น
+	buffDebuffModifier := 1.0
 
 	var targetEffects []domain.ActiveEffect
 	if target.ActiveEffects != nil {
@@ -57,128 +75,53 @@ func (s *combatService) calculateEffectValue(caster *domain.Combatant, target *d
 	}
 
 	for _, activeEffect := range targetEffects {
-		// --- ⭐️ ปรับปรุง Logic Buff/Debuff ⭐️ ---
 		switch activeEffect.EffectID {
-		case 110: // BUFF_DEFENSE_UP (กายาเหล็ก/ผิวศิลา)
-			// ⭐️ ณัชชาแก้ตรงนี้: ใช้ isFriendlyEffect เช็ค
-			if !isFriendlyEffect { // บัฟป้องกัน ไม่ควรลด Heal/Shield
-				reductionPercent := 0.5 // Default ลด 50% ถ้า BaseValue = 0 (จาก Harden)
+		case 2204: // BUFF_DEFENSE_UP
+			if !isFriendlyEffect {
+				reductionPercent := 0.5
 				if activeEffect.Value > 0 {
-					reductionPercent = float64(activeEffect.Value) / 100.0 // ถ้ามี Value ให้ใช้ค่านั้น
+					reductionPercent = float64(activeEffect.Value) / 100.0
 				}
-				buffDebuffModifier *= (1.0 - reductionPercent) // ลด Damage ตาม %
-				s.appLogger.Info("Applying DEFENSE_UP modifier", "target_id", target.ID, "reduction", reductionPercent)
+				buffDebuffModifier *= (1.0 - reductionPercent)
 			}
-		case 302: // DEBUFF_VULNERABLE (เปิดจุดอ่อน/Analyze)
-			// ⭐️ ณัชชาแก้ตรงนี้: ใช้ isFriendlyEffect เช็ค
-			if !isFriendlyEffect { // Vulnerable ไม่ควรเพิ่ม Heal/Shield
+		case 4102: // DEBUFF_VULNERABLE
+			if !isFriendlyEffect {
 				increasePercent := float64(activeEffect.Value) / 100.0
-				buffDebuffModifier *= (1.0 + increasePercent) // เพิ่ม Damage ตาม %
-				s.appLogger.Info("Applying VULNERABLE modifier", "target_id", target.ID, "increase", increasePercent)
+				buffDebuffModifier *= (1.0 + increasePercent)
 			}
-			// TODO: เพิ่ม case 103 (BUFF_DAMAGE_UP ของ Caster) -> อันนี้ต้องเช็คที่ Caster ไม่ใช่ Target
 		}
-		// ------------------------------------
 	}
 
-	// --- ✨⭐️ เช็ค Buff ที่ Caster! ⭐️✨ ---
 	var casterEffects []domain.ActiveEffect
 	if caster.ActiveEffects != nil {
-		err := json.Unmarshal(caster.ActiveEffects, &casterEffects)
-		if err != nil {
-			s.appLogger.Error("Failed to unmarshal caster active effects", err, "caster_id", caster.ID)
-		}
+		json.Unmarshal(caster.ActiveEffects, &casterEffects)
 	}
 	for _, activeEffect := range casterEffects {
-		switch activeEffect.EffectID {
-		case 103: // BUFF_DAMAGE_UP (Caster)
-			// ⭐️ ณัชชาแก้ตรงนี้: ใช้ isFriendlyEffect เช็ค
-			if !isFriendlyEffect { // Damage Up ไม่ควรเพิ่ม Heal/Shield
-				increasePercent := float64(activeEffect.Value) / 100.0
-				buffDebuffModifier *= (1.0 + increasePercent) // เพิ่ม Damage ตาม % จากบัฟผู้ร่าย
-				s.appLogger.Info("Applying DAMAGE_UP modifier (from Caster)", "caster_id", caster.ID, "increase", increasePercent)
-			}
+		if activeEffect.EffectID == 2202 && !isFriendlyEffect { // BUFF_DAMAGE_UP
+			increasePercent := float64(activeEffect.Value) / 100.0
+			buffDebuffModifier *= (1.0 + increasePercent)
 		}
 	}
-	// --- ✨⭐️ สิ้นสุดการเช็ค Buff ที่ Caster ⭐️✨ ---
 
-	// ⭐️ คำนวณ Final Value โดยรวมทุกอย่าง (รวม powerModifier!) ⭐️
 	finalValue := (baseValue + masteryBonus + talentBonus) * elementalModifier * buffDebuffModifier * powerModifier
-
-	// ปัดเศษทศนิยมเหลือ 2 ตำแหน่ง (เผื่อ Debug ง่ายขึ้น)
 	finalValue = math.Round(finalValue*100) / 100
 
-	logMessage := "Effect Value Calculation"
-	// ⭐️ ณัชชาแก้ตรงนี้: ใช้ isFriendlyEffect เช็ค
-	if isFriendlyEffect {
-		logMessage = "Friendly Effect Value Calculation" // ⭐️ แก้ Log
-	}
-
-	s.appLogger.Info(logMessage,
-		"base", baseValue,
-		"talent", talentBonus,
-		"elemental", elementalModifier,
-		"buff_debuff", buffDebuffModifier,
-		"power_mod", powerModifier,
-		"final", finalValue,
-		"spell_id", spell.ID,
-		"effect_id", effect.EffectID, // เพิ่ม EffectID เข้าไปใน Log
-	)
 	return finalValue, nil
 }
 
-// getTalentBonus จะไป "ค้นสูตร" แล้วส่งต่อให้ "ผู้เชี่ยวชาญการคำนวณ"
-func (s *combatService) getTalentBonus(caster *domain.Combatant, spell *domain.Spell, effectID uint) float64 {
-	// ถ้าไม่มีข้อมูลตัวละคร (เช่น เป็น Enemy ร่าย) ก็ไม่มีโบนัส Talent
-	if caster.Character == nil {
-		return 0.0
-	}
+// ==================== ACTIVE FUNCTIONS ====================
 
-	// --- ⭐️ เพิ่ม Logic พิเศษสำหรับ Heal! ⭐️ ---
-	// เช็คว่า Effect ที่กำลังคำนวณ เป็น Heal หรือ HoT หรือไม่
-	isHealEffect := (effectID == 3 || effectID == 100)
-	if isHealEffect {
-		s.appLogger.Info("Calculating Talent Bonus for Heal using TalentL", "effect_id", effectID)
-		// ⭐️ TODO: ดึงค่าตัวหาร (10.0) มาจาก Game Config สำหรับ Heal โดยเฉพาะ ⭐️
-		talentDivisor := 10.0
-		// บังคับให้ใช้ Talent L (ID 2) เสมอสำหรับ Heal
-		return s.getTalentValue(caster.Character, 2) / talentDivisor
-	}
-	// --- ⭐️ สิ้นสุด Logic พิเศษสำหรับ Heal ⭐️ ---
-
-	// --- Logic เดิมสำหรับ Effect อื่นๆ (Damage, Debuff, etc.) ---
-	// ตรวจสอบว่าเป็นเวท T0 (ธาตุพื้นฐาน 1-4) หรือไม่
-	if spell.ElementID <= 4 {
-		// ถ้าเป็น T0... ใช้ Talent ของธาตุนั้น 100%
-		return s.calculateTalentBonusFromRecipe(map[uint]int{spell.ElementID: 1}, caster.Character)
-	}
-
-	// ถ้าเป็น T1+... ไปค้นหาสูตรผสมธาตุ
-	recipe, err := s.gameDataRepo.FindRecipeByOutputElementID(spell.ElementID)
-	if err != nil {
-		s.appLogger.Error(fmt.Sprintf("Failed to find recipe for T1+ spell (spell_id: %d)", spell.ID), err)
-		return 0.0 // คืนค่า 0.0 ถ้าหาสูตรไม่เจอ
-	}
-	if recipe == nil {
-		s.appLogger.Warn("No recipe found for T1+ spell", "spell_id", spell.ID, "element_id", spell.ElementID)
-		return 0.0
-	}
-
-	// แปลงสูตรเป็น map เพื่อนับจำนวนธาตุตั้งต้น
-	ingredientCount := make(map[uint]int)
-	for _, ing := range recipe.Ingredients {
-		ingredientCount[ing.InputElementID]++
-	}
-
-	// ส่ง map สูตรไปคำนวณโบนัส Talent ตามกฎ (เช่น กฎธาตุเด่น)
-	return s.calculateTalentBonusFromRecipe(ingredientCount, caster.Character)
-}
-
-// --- 📝 เพิ่ม "ผู้ช่วย" คนใหม่นี้เข้าไป! 📝 ---
 // calculateTalentBonusFromRecipe คือ "ผู้เชี่ยวชาญการคำนวณ" ที่ใช้ "กฎ" ของเรา!
 func (s *combatService) calculateTalentBonusFromRecipe(ingredients map[uint]int, character *domain.Character) float64 {
 	totalBonus := 0.0
-	talentDivisor := 10.0 // ⭐️ TODO: ดึง "10.0" มาจาก Game Config ("TALENT_DMG_DIVISOR")
+	// ⭐️ ดึงค่าตัวหารจาก Game Config ⭐️
+	talentDivisorStr, _ := s.gameDataRepo.GetGameConfigValue("TALENT_DMG_DIVISOR")
+	talentDivisor := 10.0 // Default fallback
+	if talentDivisorStr != "" {
+		if val, err := strconv.ParseFloat(talentDivisorStr, 64); err == nil {
+			talentDivisor = val
+		}
+	}
 
 	// --- Logic สำหรับ T0 (S) และ T1 (S+P) ---
 	// (กฎอัจฉริยะของน้องชาย: ยกประโยชน์ให้ 100% ทั้งคู่)
@@ -198,7 +141,7 @@ func (s *combatService) calculateTalentBonusFromRecipe(ingredients map[uint]int,
 	return totalBonus
 }
 
-// (ฟังก์ชันลูกตัวจิ๋ว ที่ช่วยให้โค้ดสะอาด - อาจจะมีอยู่แล้ว)
+// getTalentValue ดึงค่า talent จาก character ตาม element ID
 func (s *combatService) getTalentValue(character *domain.Character, elementID uint) float64 {
 	switch elementID {
 	case 1:
@@ -214,6 +157,7 @@ func (s *combatService) getTalentValue(character *domain.Character, elementID ui
 	}
 }
 
+// getElementalModifier ดึงค่า modifier จากความได้เปรียบด้านธาตุ
 func (s *combatService) getElementalModifier(attackerID, defenderID uint) (float64, error) {
 	if defenderID == 0 {
 		return 1.0, nil

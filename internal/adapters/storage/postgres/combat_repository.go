@@ -76,3 +76,77 @@ func (r *combatRepository) UpdateMatch(match *domain.CombatMatch) (*domain.Comba
 	// ดึงข้อมูลล่าสุดทั้งหมดกลับมาอีกครั้ง (เหมือนเดิม)
 	return r.FindMatchByID(match.ID.String())
 }
+
+// ==================== Cleanup Methods ====================
+
+// FindStaleMatches หา match ที่ไม่มีความเคลื่อนไหวเกินเวลากำหนด (นาที)
+// ใช้สำหรับ monitoring หรือ preview ก่อน abort
+func (r *combatRepository) FindStaleMatches(inactiveMinutes int) ([]*domain.CombatMatch, error) {
+	var matches []*domain.CombatMatch
+	err := r.db.
+		Where("status = ?", domain.MatchInProgress).
+		Where("updated_at < NOW() - INTERVAL '? minutes'", inactiveMinutes).
+		Order("updated_at ASC").
+		Find(&matches).Error
+	return matches, err
+}
+
+// AbortStaleMatches abort match ทั้งหมดที่ไม่มีความเคลื่อนไหวเกินเวลากำหนด
+// return จำนวน match ที่ถูก abort
+func (r *combatRepository) AbortStaleMatches(inactiveMinutes int) (int64, error) {
+	now := gorm.Expr("NOW()")
+	result := r.db.Model(&domain.CombatMatch{}).
+		Where("status = ?", domain.MatchInProgress).
+		Where("updated_at < NOW() - INTERVAL '? minutes'", inactiveMinutes).
+		Updates(map[string]interface{}{
+			"status":      domain.MatchAborted,
+			"finished_at": now,
+			"updated_at":  now,
+		})
+	return result.RowsAffected, result.Error
+}
+
+// FindPlayerActiveMatch หา match ที่ผู้เล่นกำลังเล่นอยู่ (IN_PROGRESS)
+// ใช้สำหรับตรวจสอบก่อนสร้าง match ใหม่ (ป้องกันการเปิดหลายห้องพร้อมกัน)
+func (r *combatRepository) FindPlayerActiveMatch(characterID uint) (*domain.CombatMatch, error) {
+	var match domain.CombatMatch
+	err := r.db.
+		Joins("JOIN combatants ON combatants.match_id = combat_matches.id").
+		Where("combat_matches.status = ?", domain.MatchInProgress).
+		Where("combatants.character_id = ?", characterID).
+		Preload("Combatants.Character.PrimaryElement").
+		Preload("Combatants.Enemy.Element").
+		First(&match).Error
+
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil // ไม่มี active match = OK
+	}
+	return &match, err
+}
+
+// AbortMatchByID abort match เฉพาะ ID (ใช้เมื่อผู้เล่น disconnect หรือ forfeit)
+func (r *combatRepository) AbortMatchByID(matchID string, reason string) (*domain.CombatMatch, error) {
+	var match domain.CombatMatch
+
+	// หา match ก่อน
+	if err := r.db.Where("id = ?", matchID).First(&match).Error; err != nil {
+		return nil, err
+	}
+
+	// ตรวจสอบว่ายังเล่นอยู่หรือเปล่า
+	if match.Status != domain.MatchInProgress {
+		return &match, nil // จบแล้ว ไม่ต้องทำอะไร
+	}
+
+	// Abort
+	now := gorm.Expr("NOW()")
+	if err := r.db.Model(&match).Updates(map[string]interface{}{
+		"status":      domain.MatchAborted,
+		"finished_at": now,
+		"updated_at":  now,
+	}).Error; err != nil {
+		return nil, err
+	}
+
+	return r.FindMatchByID(matchID)
+}

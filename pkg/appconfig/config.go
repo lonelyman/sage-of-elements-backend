@@ -9,11 +9,12 @@ import (
 
 // Config คือ struct หลักที่เก็บทุกอย่าง
 type Config struct {
-	App      AppConfig    `mapstructure:"app"`
-	Server   ServerConfig `mapstructure:"server"`
-	Postgres PostgresDbs  `mapstructure:"postgres"`
-	Auth     AuthConfig   `mapstructure:"auth"`
-	Redis    RedisConfig  `mapstructure:"redis"`
+	App      AppConfig     `mapstructure:"app"`
+	Server   ServerConfig  `mapstructure:"server"`
+	Cleanup  CleanupConfig `mapstructure:"cleanup"`
+	Postgres PostgresDbs   `mapstructure:"postgres"`
+	Auth     AuthConfig    `mapstructure:"auth"`
+	Redis    RedisConfig   `mapstructure:"redis"`
 }
 
 type AppConfig struct {
@@ -25,6 +26,11 @@ type ServerConfig struct {
 	Mode     string `mapstructure:"mode"`
 	AppPort  string `mapstructure:"appport"`  // ✨ ชัดเจน! นี่คือพอร์ตของ App ข้างใน
 	HostPort string `mapstructure:"hostport"` // ✨ ชัดเจน! นี่คือพอร์ตบน Host ข้างนอก
+}
+
+type CleanupConfig struct {
+	IntervalMinutes int `mapstructure:"interval_minutes"` // ทุกกี่นาทีให้รัน cleanup job
+	TimeoutMinutes  int `mapstructure:"timeout_minutes"`  // abort match ที่ไม่มีความเคลื่อนไหวเกินกี่นาที
 }
 
 type PostgresDbs struct {

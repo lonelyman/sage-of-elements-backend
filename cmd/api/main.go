@@ -131,6 +131,9 @@ func main() {
 	combatSvc := combat.NewCombatService(appLogger, combatRepo, characterRepo, enemyRepo, pveRepo, gameDataDbRepo, deckRepo)
 	combatHandler := combat.NewCombatHandler(appLogger, appValidator, combatSvc)
 
+	// 🧹 Setup Cleanup Job - ทำความสะอาด match ที่ค้าง
+	setupCleanupJob(combatSvc, appLogger, cfg.Cleanup)
+
 	// --- 4. Setup Fiber App & Routes ---
 	app := fiber.New(fiber.Config{
 		AppName: "Sage of the Elements API " + cfg.App.Version,
@@ -226,4 +229,41 @@ func main() {
 	}
 
 	appLogger.Info("Server gracefully stopped")
+}
+
+// setupCleanupJob เริ่ม background job สำหรับทำความสะอาด match ค้าง
+func setupCleanupJob(combatSvc combat.CombatService, logger applogger.Logger, cfg appconfig.CleanupConfig) {
+	// อ่านค่าจาก config (ถ้าไม่มีให้ใช้ default)
+	intervalMinutes := cfg.IntervalMinutes
+	if intervalMinutes <= 0 {
+		intervalMinutes = 30 // default 30 นาที
+	}
+	timeoutMinutes := cfg.TimeoutMinutes
+	if timeoutMinutes <= 0 {
+		timeoutMinutes = 120 // default 120 นาที
+	}
+
+	cleanupInterval := time.Duration(intervalMinutes) * time.Minute
+
+	logger.Info("🧹 Stale match cleanup job started",
+		"interval", cleanupInterval.String(),
+		"timeout_minutes", timeoutMinutes,
+	)
+
+	ticker := time.NewTicker(cleanupInterval)
+	go func() {
+		for range ticker.C {
+			count, err := combatSvc.CleanupStaleMatches(timeoutMinutes)
+			if err != nil {
+				logger.Error("Failed to cleanup stale matches", err)
+			} else if count > 0 {
+				logger.Warn("Aborted stale matches",
+					"count", count,
+					"timeout_minutes", timeoutMinutes,
+				)
+			} else {
+				logger.Debug("Stale match cleanup completed - no stale matches found")
+			}
+		}
+	}()
 }

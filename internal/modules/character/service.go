@@ -57,7 +57,7 @@ func (s *characterService) CreateCharacter(playerID uint, name string, gender st
 	}
 
 	// 3. คำนวณค่า Talent เริ่มต้น!
-	talents := calculateInitialTalents(gender, elementID)
+	talentS, talentL, talentG, talentP := calculateInitialTalents(elementID)
 
 	// 4. สร้าง Struct Character หลัก
 	newCharacter := &domain.Character{
@@ -67,10 +67,10 @@ func (s *characterService) CreateCharacter(playerID uint, name string, gender st
 		PrimaryElementID: elementID,
 		Level:            1,
 		Exp:              0,
-		TalentS:          talents["S"],
-		TalentL:          talents["L"],
-		TalentG:          talents["G"],
-		TalentP:          talents["P"],
+		TalentS:          talentS,
+		TalentL:          talentL,
+		TalentG:          talentG,
+		TalentP:          talentP,
 	}
 
 	// --- ⭐️ ส่วนที่เพิ่มเข้ามา ⭐️ ---
@@ -112,33 +112,19 @@ func (s *characterService) CreateCharacter(playerID uint, name string, gender st
 }
 
 // calculateInitialTalents เป็น helper function ที่ใช้คำนวณ Talent เริ่มต้น
-func calculateInitialTalents(gender string, elementID uint) map[string]int {
-	talents := map[string]int{"S": 3, "L": 3, "G": 3, "P": 3}
-
-	// Affinity Map (กฎความสัมพันธ์ของธาตุ)
-	// สมมติว่า ID 1=S, 2=L, 3=G, 4=P
-	affinityMap := map[uint]uint{1: 4, 2: 3, 3: 2, 4: 1} // S->P, L->G, G->L, P->S
-
-	elementMap := map[uint]string{1: "S", 2: "L", 3: "G", 4: "P"}
-
-	// 1. ใส่ 90 แต้มให้ธาตุหลัก
-	primaryElementString := elementMap[elementID]
-	talents[primaryElementString] = 90
-
-	// 2. ใส่ 4 แต้มให้ธาตุคู่หู
-	affinityElementID := affinityMap[elementID]
-	affinityElementString := elementMap[affinityElementID]
-	talents[affinityElementString] = 4
-
-	// 3. ใส่โบนัสเพศ +5
-	switch gender {
-	case "MALE":
-		talents["P"] += 5
-	case "FEMALE":
-		talents["L"] += 5
+func calculateInitialTalents(primaryElementID uint) (int, int, int, int) {
+	// Base talents for all elements
+	talents := map[uint]int{
+		1: 3, // S
+		2: 3, // L
+		3: 3, // G
+		4: 3, // P
 	}
 
-	return talents
+	// Add primary element bonus
+	talents[primaryElementID] += 90
+
+	return talents[1], talents[2], talents[3], talents[4]
 }
 
 // ListCharacters คือฟังก์ชันสำหรับดึงรายชื่อตัวละครทั้งหมดของผู้เล่น
@@ -328,7 +314,32 @@ func (s *characterService) SkipTutorial(playerID, characterID uint) (*domain.Cha
 	char.TutorialStep = domain.TutorialStepCompleted
 	s.appLogger.Info("Skipping tutorial", "char_id", char.ID)
 
-
 	// 3. บันทึกข้อมูลที่อัปเดตแล้วกลับลง DB
 	return s.repoCharacter.Save(char)
+}
+
+// GrantExp เพิ่ม EXP ให้กับตัวละคร (จะถูกเรียกจาก Combat Service หลังจบแมตช์)
+func (s *characterService) GrantExp(characterID uint, expAmount int) error {
+	// 1. ดึงตัวละครมาก่อน
+	character, err := s.repoCharacter.FindByID(characterID)
+	if err != nil {
+		s.appLogger.Error("failed to find character for exp grant", err)
+		return apperrors.SystemError("failed to retrieve character")
+	}
+	if character == nil {
+		return apperrors.NotFoundError("character not found")
+	}
+
+	// 2. เพิ่ม EXP
+	character.Exp += expAmount
+	s.appLogger.Info("granted exp to character", "character_id", characterID, "exp_amount", expAmount, "new_total", character.Exp)
+
+	// 3. บันทึกกลับเข้าฐานข้อมูล
+	_, err = s.repoCharacter.Save(character)
+	if err != nil {
+		s.appLogger.Error("failed to save character after exp grant", err)
+		return apperrors.SystemError("failed to update character exp")
+	}
+
+	return nil
 }

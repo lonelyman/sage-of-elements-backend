@@ -12,7 +12,6 @@ type Enemy struct {
 	Level        int            `gorm:"not null;comment:เลเวลพื้นฐานของศัตรู"`
 	MaxHP        int            `gorm:"not null;comment:พลังชีวิตสูงสุดพื้นฐาน"`
 	Initiative   int            `gorm:"not null;comment:ค่าความเร็วพื้นฐาน"`
-	MaxEndurance int            `gorm:"not null;comment:ค่าความอดทนสูงสุดพื้นฐาน"`
 	ElementID    uint           `gorm:"comment:ID ของธาตุประจำตัวศัตรู (FK to elements)"`
 	Element      *Element       `gorm:"foreignKey:ElementID;references:ID"`
 

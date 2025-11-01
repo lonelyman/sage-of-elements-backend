@@ -111,6 +111,20 @@ func (r *gameDataRepository) FindSpellByID(id uint) (*domain.Spell, error) {
 	return &spell, nil
 }
 
+func (r *gameDataRepository) FindSpellByElementAndMastery(elementID uint, masteryID uint) (*domain.Spell, error) {
+	var spell domain.Spell
+	err := r.db.Preload("Effects.Effect").
+		Where("element_id = ? AND mastery_id = ?", elementID, masteryID).
+		First(&spell).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil // ไม่เจอไม่ใช่ error
+		}
+		return nil, err
+	}
+	return &spell, nil
+}
+
 func (r *gameDataRepository) FindEffectByID(id uint) (*domain.Effect, error) {
 	var effect domain.Effect
 	err := r.db.First(&effect, id).Error

@@ -182,7 +182,7 @@ func main() {
 	gameDataGroup := apiV1.Group("/game-data")
 	fusionGroup := apiV1.Group("/fusion")
 	pveGroup := apiV1.Group("/pve")
-	matchGroup := apiV1.Group("/matches")
+	combatGroup := apiV1.Group("/combat")
 	enemyGroup := apiV1.Group("/enemies")
 	// --- Public Routes ---
 	playerHandler.RegisterPublicRoutes(playerGroup)
@@ -193,7 +193,7 @@ func main() {
 	gameDataGroup.Use(authMiddleware)
 	fusionGroup.Use(authMiddleware)
 	pveGroup.Use(authMiddleware)
-	matchGroup.Use(authMiddleware)
+	combatGroup.Use(authMiddleware)
 	enemyGroup.Use(authMiddleware)
 	// comment out for test
 	// --- Protected Routes ---
@@ -206,7 +206,7 @@ func main() {
 	fusionHandler.RegisterProtectedRoutes(fusionGroup)
 	pveHandler.RegisterProtectedRoutes(pveGroup)
 	enemyHandler.RegisterProtectedRoutes(enemyGroup)
-	combatHandler.RegisterProtectedRoutes(matchGroup)
+	combatHandler.RegisterProtectedRoutes(combatGroup)
 
 	// --- 5. Start Server & Graceful Shutdown ---
 	go func() {

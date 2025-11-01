@@ -183,19 +183,23 @@ func (s *combatService) _ApplySpecificEffect(
 		return s.__ApplyHealEffect(target, finalValue)
 
 	case domain.EffectTypeShield:
-		duration := int(spellEffect.DurationInTurns)
+		baseDuration := int(spellEffect.DurationInTurns)
+		duration := s._CalculateDurationBonus(caster, baseDuration)
 		return s.__ApplyShieldEffect(target, finalValue, duration)
 
 	case domain.EffectTypeBuff:
-		duration := int(spellEffect.DurationInTurns)
+		baseDuration := int(spellEffect.DurationInTurns)
+		duration := s._CalculateDurationBonus(caster, baseDuration)
 		return s.__ApplyBuffEffect(target, effectID, finalValue, duration)
 
 	case domain.EffectTypeDebuff:
-		duration := int(spellEffect.DurationInTurns)
+		baseDuration := int(spellEffect.DurationInTurns)
+		duration := s._CalculateDurationBonus(caster, baseDuration)
 		return s.__ApplyDebuffEffect(caster, target, effectID, finalValue, duration, spellEffect)
 
 	case domain.EffectTypeSynergyBuff:
-		duration := int(spellEffect.DurationInTurns)
+		baseDuration := int(spellEffect.DurationInTurns)
+		duration := s._CalculateDurationBonus(caster, baseDuration)
 		return s.__ApplySynergyBuffEffect(caster, effectID, duration)
 
 	case domain.EffectTypeResource:

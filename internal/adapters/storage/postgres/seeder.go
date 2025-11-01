@@ -261,10 +261,10 @@ func seedGameConfig(tx *gorm.DB) error {
 		{Key: "TALENT_PRIMARY_ALLOCATION", Value: "90"},
 
 		// Core Stats
-		{Key: "STAT_HP_BASE", Value: "100"},
-		{Key: "STAT_HP_PER_TALENT_S", Value: "2"},
-		{Key: "STAT_MP_BASE", Value: "50"},
-		{Key: "STAT_MP_PER_TALENT_L", Value: "1"},
+		{Key: "STAT_HP_BASE", Value: "900"},
+		{Key: "STAT_HP_PER_TALENT_S", Value: "30"},
+		{Key: "STAT_MP_BASE", Value: "200"},
+		{Key: "STAT_MP_PER_TALENT_L", Value: "2"},
 		{Key: "STAT_MP_REGEN_PER_TURN", Value: "5"},
 		{Key: "STAT_INITIATIVE_BASE_MIN", Value: "40"},
 		{Key: "STAT_INITIATIVE_BASE_MAX", Value: "60"},
@@ -295,6 +295,34 @@ func seedGameConfig(tx *gorm.DB) error {
 		{Key: "EXP_TRAINING_MATCH", Value: "50"},
 		{Key: "EXP_STORY_MATCH", Value: "100"},
 		{Key: "EXP_PVP_MATCH", Value: "150"},
+
+		// Casting Modes (ข้อตกลงล่าสุด - ชุด B)
+		{Key: "CAST_MODE_CHARGE_POWER_MOD", Value: "1.2"},
+		{Key: "CAST_MODE_CHARGE_AP_ADD", Value: "1"},
+		{Key: "CAST_MODE_CHARGE_MP_ADD", Value: "0"},
+		{Key: "CAST_MODE_OVERCHARGE_POWER_MOD", Value: "1.5"},
+		{Key: "CAST_MODE_OVERCHARGE_AP_ADD", Value: "1"},
+		{Key: "CAST_MODE_OVERCHARGE_MP_ADD", Value: "30"},
+
+		// Damage & Heal Calculation
+		{Key: "TALENT_DMG_DIVISOR", Value: "10"},
+		{Key: "TALENT_HEAL_DIVISOR", Value: "10"},
+
+		// Improvisation (Talent G - Multi-Cast)
+		{Key: "TALENT_G_MULTICAST_DIVISOR", Value: "5"},
+		{Key: "TALENT_G_MULTICAST_CAP_STORY", Value: "25"},
+		{Key: "TALENT_G_MULTICAST_CAP_PVP", Value: "20"},
+		{Key: "TALENT_G_MULTICAST_CAP_TRAINING", Value: "30"},
+
+		// Persistence (Talent P - DoT/HoT Duration)
+		{Key: "TALENT_P_DURATION_DIVISOR", Value: "30"},
+
+		// Player Progression
+		{Key: "PLAYER_BASE_EXP", Value: "100"},
+		{Key: "PLAYER_EXP_GROWTH_RATE", Value: "1.15"},
+		{Key: "PLAYER_MAX_LEVEL", Value: "50"},
+		{Key: "TALENT_POINTS_PER_LEVEL", Value: "3"},
+		{Key: "PLAYER_EXP_CARRY_OVER", Value: "true"},
 	}
 	return tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&configs).Error
 }

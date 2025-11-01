@@ -94,5 +94,54 @@ func (s *combatService) ExecuteSpellCast(
 		"evaded", applicationResult.EffectsEvaded,
 	)
 
+	// ==================== STEP 6: Check Multi-Cast (Improvisation - Talent G) ====================
+	triggered, chance := s._ShouldTriggerMultiCast(prepResult.Caster, string(match.MatchType))
+	if triggered {
+		s.appLogger.Info("🎲 MULTI-CAST TRIGGERED!",
+			"caster_id", prepResult.Caster.ID,
+			"chance", chance,
+			"spell_id", spellID,
+		)
+
+		// ร่ายซ้ำโดยใช้ค่าเดิมทั้งหมด (แต่ไม่หัก AP/MP อีก)
+		// ⚠️ Important: ต้อง recalculate ทุกอย่างเพราะ target อาจมีสถานะเปลี่ยน
+		multicastInitialValues, err := s.CalculateInitialEffectValues(prepResult.Spell, prepResult.Caster)
+		if err != nil {
+			s.appLogger.Warn("Multi-Cast: Failed to calculate initial values", "error", err)
+			// ไม่ return error เพราะ main cast สำเร็จแล้ว
+			return nil
+		}
+
+		multicastModifierCtx, err := s.CalculateCombinedModifiers(
+			prepResult.Caster,
+			prepResult.Target,
+			prepResult.Spell,
+			prepResult.PowerModifier,
+			0,
+		)
+		if err != nil {
+			s.appLogger.Warn("Multi-Cast: Failed to calculate modifiers", "error", err)
+			return nil
+		}
+
+		multicastResult, err := s.ApplyCalculatedEffects(
+			prepResult.Caster,
+			prepResult.Target,
+			prepResult.Spell,
+			multicastInitialValues,
+			multicastModifierCtx,
+		)
+		if err != nil {
+			s.appLogger.Warn("Multi-Cast: Failed to apply effects", "error", err)
+			return nil
+		}
+
+		s.appLogger.Info("✨ MULTI-CAST SUCCESS!",
+			"effects_applied", multicastResult.EffectsApplied,
+			"total_damage", multicastResult.TotalDamage,
+			"total_healing", multicastResult.TotalHealing,
+		)
+	}
+
 	return nil
 }

@@ -3,6 +3,7 @@ package combat
 
 import (
 	"fmt"
+	"math/rand"
 	"sage-of-elements-backend/internal/domain"
 )
 
@@ -35,14 +36,19 @@ func (s *combatService) CalculateInitialEffectValues(
 		// 2.1 Get Base Value
 		baseValue := s._GetBaseValue(spellEffect)
 
-		// 2.2 Calculate Mastery Bonus (multiplicative)
-		masteryBonus := s._CalculateMasteryBonus(caster, spell.MasteryID)
+		// 2.2 Calculate Mastery Bonus (additive)
+		// ⭐️ HEAL (1103) ไม่ใช้ Mastery Bonus ⭐️
+		masteryBonus := 0.0
+		if spellEffect.EffectID != 1103 { // Not HEAL
+			masteryBonus = s._CalculateMasteryBonus(caster, spell.MasteryID)
+		}
 
 		// 2.3 Calculate Talent Bonus (additive)
 		talentBonus := s._CalculateTalentBonus(caster, spell, spellEffect.EffectID)
 
-		// Combine: (base * mastery) + talent
-		initialValue := (baseValue * masteryBonus) + talentBonus
+		// Combine: base + mastery + talent
+		// (HEAL: base + talent only, since masteryBonus = 0)
+		initialValue := baseValue + masteryBonus + talentBonus
 
 		result[spellEffect.EffectID] = initialValue
 
@@ -152,6 +158,12 @@ func (s *combatService) _CalculateTalentBonus(
 	spell *domain.Spell,
 	effectID uint,
 ) float64 {
+	// ⭐️ Special Case: HEAL (1103) ใช้ Talent L โดยเฉพาะ ⭐️
+	if effectID == 1103 { // HEAL_HP
+		return s._CalculateHealTalentBonus(caster)
+	}
+
+	// ⭐️ Default: Damage Effects ใช้ recipe-based talent ⭐️
 	// ใช้ฟังก์ชันเดิมจาก calculator.go
 	// NOTE: ต้องหา recipe ก่อนถ้าเป็น T1+
 	if spell.ElementID <= 4 {
@@ -177,6 +189,47 @@ func (s *combatService) _CalculateTalentBonus(
 	}
 
 	return s.calculateTalentBonusFromRecipe(ingredientCount, caster.Character)
+}
+
+// _CalculateHealTalentBonus คำนวณโบนัสจาก Talent L สำหรับ Heal
+func (s *combatService) _CalculateHealTalentBonus(caster *domain.Combatant) float64 {
+	// ถ้าไม่มี character (เช่น Enemy) ไม่มี talent bonus
+	if caster.Character == nil {
+		s.appLogger.Debug("No character found for heal talent bonus, returning 0")
+		return 0.0
+	}
+
+	// ดึง Talent L
+	talentL := caster.Character.TalentL
+	if talentL <= 0 {
+		s.appLogger.Debug("Talent L is 0, no heal bonus")
+		return 0.0
+	}
+
+	// ดึง Divisor จาก config
+	divisorStr, err := s.gameDataRepo.GetGameConfigValue("TALENT_HEAL_DIVISOR")
+	if err != nil {
+		s.appLogger.Warn("Failed to get TALENT_HEAL_DIVISOR, using default 10.0", "error", err)
+		divisorStr = "10.0"
+	}
+
+	var divisor float64
+	_, parseErr := fmt.Sscanf(divisorStr, "%f", &divisor)
+	if parseErr != nil || divisor <= 0 {
+		s.appLogger.Warn("Invalid TALENT_HEAL_DIVISOR, using default 10.0", "value", divisorStr)
+		divisor = 10.0
+	}
+
+	// คำนวณ: Talent L / Divisor
+	healBonus := float64(talentL) / divisor
+
+	s.appLogger.Debug("Heal talent bonus calculated",
+		"talent_l", talentL,
+		"divisor", divisor,
+		"heal_bonus", healBonus,
+	)
+
+	return healBonus
 }
 
 // ==================== STEP 3 Sub-functions ====================
@@ -249,4 +302,108 @@ func (s *combatService) _GetPowerModifier(castingMode string) float64 {
 		return 1.0
 	}
 	return mod
+}
+
+// _ShouldTriggerMultiCast ตรวจสอบว่าควร trigger Multi-Cast หรือไม่
+// โดยใช้ Talent G และ match type เพื่อคำนวณโอกาส
+func (s *combatService) _ShouldTriggerMultiCast(
+	caster *domain.Combatant,
+	matchType string,
+) (bool, float64) {
+	// ถ้าไม่มี Character (เป็น Enemy) ไม่สามารถใช้ Multi-Cast ได้
+	if caster.Character == nil {
+		return false, 0.0
+	}
+
+	talentG := caster.Character.TalentG
+	if talentG == 0 {
+		return false, 0.0
+	}
+
+	// ดึง Config
+	divisorStr, _ := s.gameDataRepo.GetGameConfigValue("TALENT_G_MULTICAST_DIVISOR")
+	var divisor float64
+	fmt.Sscanf(divisorStr, "%f", &divisor)
+	if divisor <= 0 {
+		divisor = 5.0 // Default
+	}
+
+	// คำนวณ Base Chance
+	baseChance := float64(talentG) / divisor
+
+	// ดึง Cap ตาม Match Type
+	var capConfigKey string
+	switch matchType {
+	case "PVP":
+		capConfigKey = "TALENT_G_MULTICAST_CAP_PVP"
+	case "STORY":
+		capConfigKey = "TALENT_G_MULTICAST_CAP_STORY"
+	default: // TRAINING
+		capConfigKey = "TALENT_G_MULTICAST_CAP_TRAINING"
+	}
+
+	capStr, _ := s.gameDataRepo.GetGameConfigValue(capConfigKey)
+	var cap float64
+	fmt.Sscanf(capStr, "%f", &cap)
+	if cap <= 0 {
+		cap = 25.0 // Default
+	}
+
+	// Apply Cap
+	finalChance := baseChance
+	if finalChance > cap {
+		finalChance = cap
+	}
+
+	// สุ่ม (0-100)
+	roll := rand.Float64() * 100
+	triggered := roll < finalChance
+
+	s.appLogger.Debug("Multi-Cast chance calculated",
+		"talent_g", talentG,
+		"base_chance", baseChance,
+		"cap", cap,
+		"final_chance", finalChance,
+		"roll", roll,
+		"triggered", triggered,
+	)
+
+	return triggered, finalChance
+}
+
+// _CalculateDurationBonus คำนวณเทิร์นเพิ่มเติมจาก Talent P สำหรับ DoT/HoT/Buff/Debuff
+func (s *combatService) _CalculateDurationBonus(
+	caster *domain.Combatant,
+	baseDuration int,
+) int {
+	// ถ้าไม่มี base duration หรือไม่มี Character ไม่ต้องเพิ่ม
+	if caster.Character == nil || baseDuration == 0 {
+		return baseDuration
+	}
+
+	talentP := caster.Character.TalentP
+	if talentP == 0 {
+		return baseDuration
+	}
+
+	// ดึง Config
+	divisorStr, _ := s.gameDataRepo.GetGameConfigValue("TALENT_P_DURATION_DIVISOR")
+	var divisor float64
+	fmt.Sscanf(divisorStr, "%f", &divisor)
+	if divisor <= 0 {
+		divisor = 30.0 // Default
+	}
+
+	// คำนวณ Bonus Turns
+	bonusTurns := int(float64(talentP) / divisor)
+	finalDuration := baseDuration + bonusTurns
+
+	s.appLogger.Debug("Duration bonus calculated",
+		"talent_p", talentP,
+		"base_duration", baseDuration,
+		"bonus_turns", bonusTurns,
+		"final_duration", finalDuration,
+	)
+
+	return finalDuration
 }
